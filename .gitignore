@@ -1,0 +1,85 @@
+# 环境配置文件
+.env
+.env.local
+.env.*.local
+
+# 依赖目录
+node_modules/
+python_modules/
+__pycache__/
+
+# 构建输出
+dist/
+build/
+out/
+
+# 日志文件
+*.log
+logs/
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+*.temp
+
+# 编辑器文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 包管理文件
+package-lock.json
+yarn.lock
+Pipfile.lock
+
+# 测试文件
+coverage/
+.coverage
+
+# 缓存目录
+.cache/
+
+# 文档生成
+apidocs/
+docs/build/
+
+# 环境变量示例文件
+.env.example
+
+# 数据库文件
+*.db
+*.sqlite
+
+# 备份文件
+*.bak
+*.backup
+
+# 编译生成的文件
+*.pyc
+*.pyo
+*.pyd
+
+# 操作系统文件
+Thumbs.db
+.DS_Store
+
+# IDE文件
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# 其他
+*.zip
+*.tar.gz
+*.rar

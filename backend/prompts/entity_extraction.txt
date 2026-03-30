@@ -1,0 +1,100 @@
+-目标-
+给定一份可能与此活动相关的文本文档，首先识别文本中捕获信息和思想所需的所有实体。
+然后，报告所识别实体之间的所有关系。
+
+-步骤-
+1. 识别所有实体。对于每个识别出的实体，提取以下信息：
+- entity_name: 实体名称，首字母大写
+- entity_type: 建议实体的几个标签或类别，类别不应过于具体，而应尽可能通用
+- entity_description: 对实体属性和活动的全面描述
+将每个实体格式化为：(entity{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>)
+
+2. 从步骤1中识别出的实体中，识别所有*明显相关*的(source_entity, target_entity)对。
+对于每对相关的实体，提取以下信息：
+- source_entity: 步骤1中识别出的源实体名称
+- target_entity: 步骤1中识别出的目标实体名称
+- relationship_description: 解释为什么认为源实体和目标实体相互关联
+- relationship_strength: 表示源实体和目标实体之间关系强度的数字分数
+将每个关系格式化为：(relationship{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_strength>)
+
+3. 以中文返回步骤1和2中识别的所有实体和关系的单一列表。使用**{record_delimiter}**作为列表分隔符。
+
+4. 如果需要翻译成中文，只需翻译描述，其他保持不变！
+
+5. 完成后，输出{completion_delimiter}。
+
+-示例-
+######################
+
+示例1：
+
+文本：
+团队领导张三宣布，公司将在第三季度推出新产品。该产品由研发部门开发，
+预计将在市场上与主要竞争对手李四公司形成直接竞争。张三表示，
+这将是一个重要的里程碑。
+
+######################
+
+输出：
+(entity{tuple_delimiter}张三{tuple_delimiter}person{tuple_delimiter}团队领导，宣布公司将在第三季度推出新产品，表示这将是一个重要的里程碑){record_delimiter}
+(entity{tuple_delimiter}公司{tuple_delimiter}organization{tuple_delimiter}将在第三季度推出新产品，与研发部门有隶属关系){record_delimiter}
+(entity{tuple_delimiter}新产品{tuple_delimiter}product{tuple_delimiter}由研发部门开发，预计将在第三季度推出，将与李四公司形成竞争){record_delimiter}
+(entity{tuple_delimiter}研发部门{tuple_delimiter}organization{tuple_delimiter}负责开发新产品，隶属于公司){record_delimiter}
+(entity{tuple_delimiter}第三季度{tuple_delimiter}time{tuple_delimiter}新产品推出的时间节点){record_delimiter}
+(entity{tuple_delimiter}李四公司{tuple_delimiter}organization{tuple_delimiter}主要竞争对手，与新公司新产品形成直接竞争){record_delimiter}
+(entity{tuple_delimiter}重要里程碑{tuple_delimiter}event{tuple_delimiter}新产品推出对公司的重要意义){record_delimiter}
+{record_delimiter}
+(relationship{tuple_delimiter}张三{tuple_delimiter}公司{tuple_delimiter}张三是公司的团队领导{tuple_delimiter}9){record_delimiter}
+(relationship{tuple_delimiter}张三{tuple_delimiter}新产品{tuple_delimiter}张三宣布推出新产品{tuple_delimiter}8){record_delimiter}
+(relationship{tuple_delimiter}公司{tuple_delimiter}新产品{tuple_delimiter}公司将推出新产品{tuple_delimiter}9){record_delimiter}
+(relationship{tuple_delimiter}公司{tuple_delimiter}研发部门{tuple_delimiter}研发部门隶属于公司{tuple_delimiter}9){record_delimiter}
+(relationship{tuple_delimiter}研发部门{tuple_delimiter}新产品{tuple_delimiter}研发部门开发新产品{tuple_delimiter}9){record_delimiter}
+(relationship{tuple_delimiter}新产品{tuple_delimiter}第三季度{tuple_delimiter}新产品将在第三季度推出{tuple_delimiter}8){record_delimiter}
+(relationship{tuple_delimiter}新产品{tuple_delimiter}李四公司{tuple_delimiter}新产品将与李四公司形成竞争{tuple_delimiter}7){record_delimiter}
+(relationship{tuple_delimiter}新产品{tuple_delimiter}重要里程碑{tuple_delimiter}新产品推出是重要里程碑{tuple_delimiter}8){record_delimiter}
+{completion_delimiter}
+
+######################
+
+示例2：
+
+文本：
+在2024年技术大会上，王五教授发表了关于人工智能伦理的演讲。他强调了
+在AI系统开发中考虑道德因素的重要性。演讲引起了与会者的广泛关注，
+特别是来自科技公司的代表们。大会主席赵六表示，这是大会历史上
+最受欢迎的主题演讲之一。
+
+######################
+
+输出：
+(entity{tuple_delimiter}王五教授{tuple_delimiter}person{tuple_delimiter}在技术大会上发表关于人工智能伦理的演讲，强调考虑道德因素的重要性){record_delimiter}
+(entity{tuple_delimiter}2024年技术大会{tuple_delimiter}event{tuple_delimiter}王五教授发表演讲的场合，赵六担任主席){record_delimiter}
+(entity{tuple_delimiter}人工智能伦理{tuple_delimiter}topic{tuple_delimiter}王五教授演讲的主题，强调道德因素的重要性){record_delimiter}
+(entity{tuple_delimiter}AI系统开发{tuple_delimiter}process{tuple_delimiter}需要考虑道德因素的技术开发过程){record_delimiter}
+(entity{tuple_delimiter}道德因素{tuple_delimiter}concept{tuple_delimiter}在AI系统开发中需要考虑的重要因素){record_delimiter}
+(entity{tuple_delimiter}与会者{tuple_delimiter}person{tuple_delimiter}参加技术大会的人群，广泛关注演讲){record_delimiter}
+(entity{tuple_delimiter}科技公司代表{tuple_delimiter}person{tuple_delimiter}与会者的一部分，特别关注演讲内容){record_delimiter}
+(entity{tuple_delimiter}赵六{tuple_delimiter}person{tuple_delimiter}大会主席，评价演讲为大会历史上最受欢迎的主题演讲之一){record_delimiter}
+(entity{tuple_delimiter}主题演讲{tuple_delimiter}event{tuple_delimiter}大会上的重要演讲环节，这是最受欢迎的之一){record_delimiter}
+{record_delimiter}
+(relationship{tuple_delimiter}王五教授{tuple_delimiter}2024年技术大会{tuple_delimiter}王五教授在技术大会上发表演讲{tuple_delimiter}9){record_delimiter}
+(relationship{tuple_delimiter}王五教授{tuple_delimiter}人工智能伦理{tuple_delimiter}王五教授演讲的主题是人工智能伦理{tuple_delimiter}10){record_delimiter}
+(relationship{tuple_delimiter}王五教授{tuple_delimiter}AI系统开发{tuple_delimiter}王五教授讨论AI系统开发中的道德问题{tuple_delimiter}8){record_delimiter}
+(relationship{tuple_delimiter}人工智能伦理{tuple_delimiter}道德因素{tuple_delimiter}人工智能伦理强调道德因素的重要性{tuple_delimiter}9){record_delimiter}
+(relationship{tuple_delimiter}AI系统开发{tuple_delimiter}道德因素{tuple_delimiter}AI系统开发需要考虑道德因素{tuple_delimiter}9){record_delimiter}
+(relationship{tuple_delimiter}与会者{tuple_delimiter}王五教授的演讲{tuple_delimiter}与会者广泛关注演讲{tuple_delimiter}7){record_delimiter}
+(relationship{tuple_delimiter}科技公司代表{tuple_delimiter}与会者{tuple_delimiter}科技公司代表是与会者的一部分{tuple_delimiter}8){record_delimiter}
+(relationship{tuple_delimiter}赵六{tuple_delimiter}2024年技术大会{tuple_delimiter}赵六是大会主席{tuple_delimiter}9){record_delimiter}
+(relationship{tuple_delimiter}赵六{tuple_delimiter}主题演讲{tuple_delimiter}赵六评价主题演讲为最受欢迎的之一{tuple_delimiter}8){record_delimiter}
+{completion_delimiter}
+
+######################
+
+-真实数据-
+使用以下输入文本回答。
+
+文本：{input_text}
+
+######################
+
+输出：

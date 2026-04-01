@@ -1,0 +1,46 @@
+[
+  {
+    "id": 1,
+    "name": "人工智能导论.pdf",
+    "size": 1024000,
+    "type": "PDF",
+    "status": "processed",
+    "uploadTime": "2026-03-30 10:30",
+    "processedTime": "2026-03-30 10:35",
+    "stats": {
+      "entities": 128,
+      "relationships": 256,
+      "chunks": 384
+    }
+  },
+  {
+    "id": 2,
+    "name": "知识图谱技术.docx",
+    "size": 2048000,
+    "type": "Word",
+    "status": "processed",
+    "uploadTime": "2026-03-29 16:45",
+    "processedTime": "2026-03-29 16:50",
+    "stats": {
+      "entities": 256,
+      "relationships": 512,
+      "chunks": 768
+    }
+  },
+  {
+    "id": 3,
+    "name": "GraphRAG研究.md",
+    "size": 512000,
+    "type": "Markdown",
+    "status": "processing",
+    "uploadTime": "2026-03-29 14:20"
+  },
+  {
+    "id": 4,
+    "name": "SQLite使用指南.txt",
+    "size": 256000,
+    "type": "文本",
+    "status": "pending",
+    "uploadTime": "2026-03-28 09:15"
+  }
+]

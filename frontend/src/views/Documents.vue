@@ -195,57 +195,33 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
 // 文档数据
-const documents = ref([
-  {
-    id: 1,
-    name: '人工智能导论.pdf',
-    size: 1024000,
-    type: 'PDF',
-    status: 'processed',
-    uploadTime: '2026-03-30 10:30',
-    processedTime: '2026-03-30 10:35',
-    stats: {
-      entities: 128,
-      relationships: 256,
-      chunks: 384,
-      processingTime: 30
+const documents = ref([])
+const loading = ref(false)
+
+// 加载文档列表
+const loadDocuments = async () => {
+  loading.value = true
+  try {
+    const response = await fetch('http://localhost:8013/api/documents')
+    if (!response.ok) {
+      throw new Error('获取文档列表失败')
     }
-  },
-  {
-    id: 2,
-    name: '知识图谱技术.docx',
-    size: 2048000,
-    type: 'Word',
-    status: 'processed',
-    uploadTime: '2026-03-29 16:45',
-    processedTime: '2026-03-29 16:50',
-    stats: {
-      entities: 256,
-      relationships: 512,
-      chunks: 768,
-      processingTime: 45
-    }
-  },
-  {
-    id: 3,
-    name: 'GraphRAG研究.md',
-    size: 512000,
-    type: 'Markdown',
-    status: 'processing',
-    uploadTime: '2026-03-29 14:20'
-  },
-  {
-    id: 4,
-    name: 'SQLite使用指南.txt',
-    size: 256000,
-    type: '文本',
-    status: 'pending',
-    uploadTime: '2026-03-28 09:15'
+    const data = await response.json()
+    documents.value = data.documents
+  } catch (error) {
+    console.error('加载文档失败:', error)
+  } finally {
+    loading.value = false
   }
-])
+}
+
+// 组件挂载时加载文档
+onMounted(() => {
+  loadDocuments()
+})
 
 // 搜索和筛选
 const searchQuery = ref('')

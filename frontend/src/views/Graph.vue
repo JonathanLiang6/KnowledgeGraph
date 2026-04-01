@@ -27,9 +27,10 @@
       </div>
     </div>
 
+    <!-- 图谱区域 -->
     <div class="graph-container">
       <!-- 左侧控制面板 -->
-      <div class="graph-sidebar">
+      <div class="left-panel">
         <div class="card">
           <h3>控制面板</h3>
           
@@ -126,51 +127,9 @@
             </button>
           </div>
         </div>
-
-        <!-- 图例 -->
-        <div class="card">
-          <h3>图例</h3>
-          <div class="legend">
-            <div class="legend-item">
-              <div class="legend-color entity"></div>
-              <span>实体</span>
-            </div>
-            <div class="legend-item">
-              <div class="legend-color relationship"></div>
-              <span>关系</span>
-            </div>
-            <div v-for="type in entityTypes" :key="type.value" class="legend-item">
-              <div class="legend-color" :style="{ backgroundColor: getNodeColor(type.value) }"></div>
-              <span>{{ type.label }}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- 统计信息 -->
-        <div class="card">
-          <h3>统计信息</h3>
-          <div class="stats">
-            <div class="stat-item">
-              <div class="stat-value">{{ graphStats.nodes }}</div>
-              <div class="stat-label">实体数量</div>
-            </div>
-            <div class="stat-item">
-              <div class="stat-value">{{ graphStats.edges }}</div>
-              <div class="stat-label">关系数量</div>
-            </div>
-            <div class="stat-item">
-              <div class="stat-value">{{ graphStats.types }}</div>
-              <div class="stat-label">实体类型</div>
-            </div>
-            <div class="stat-item">
-              <div class="stat-value">{{ graphStats.density.toFixed(2) }}</div>
-              <div class="stat-label">图谱密度</div>
-            </div>
-          </div>
-        </div>
       </div>
 
-      <!-- 右侧图谱可视化区域 -->
+      <!-- 中间图谱可视化区域 -->
       <div class="graph-main">
         <div class="graph-canvas" ref="graphCanvas">
           <!-- 加载状态 -->
@@ -224,6 +183,90 @@
                   {{ related.name }}
                 </span>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧信息面板 -->
+      <div class="right-panel">
+        <!-- 图例 -->
+        <div class="card">
+          <h3>图例</h3>
+          <div class="legend">
+            <div class="legend-item">
+              <div class="legend-color entity"></div>
+              <span>实体</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color relationship"></div>
+              <span>关系</span>
+            </div>
+            <div v-for="type in entityTypes" :key="type.value" class="legend-item">
+              <div class="legend-color" :style="{ backgroundColor: getNodeColor(type.value) }"></div>
+              <span>{{ type.label }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 统计信息 -->
+        <div class="card">
+          <h3>统计信息</h3>
+          <div class="stats">
+            <div class="stat-item">
+              <div class="stat-value">{{ graphStats.nodes }}</div>
+              <div class="stat-label">实体数量</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">{{ graphStats.edges }}</div>
+              <div class="stat-label">关系数量</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">{{ graphStats.types }}</div>
+              <div class="stat-label">实体类型</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">{{ graphStats.density.toFixed(2) }}</div>
+              <div class="stat-label">图谱密度</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 操作提示 -->
+        <div class="card">
+          <h3>操作提示</h3>
+          <div class="tips">
+            <div class="tip-item">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+              <span>点击节点查看详情</span>
+            </div>
+            <div class="tip-item">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+              <span>拖拽节点调整位置</span>
+            </div>
+            <div class="tip-item">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+              <span>滚轮缩放视图</span>
+            </div>
+            <div class="tip-item">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+              <span>点击图例筛选实体</span>
             </div>
           </div>
         </div>
@@ -315,7 +358,7 @@ const loadGraphData = async () => {
   
   try {
     // 尝试从后端API加载数据
-    const response = await fetch('/api/graph/data')
+    const response = await fetch('http://localhost:8013/api/graph/data')
     if (response.ok) {
       const data = await response.json()
       if (data.nodes && data.links) {
@@ -381,6 +424,13 @@ const initGraph = () => {
 
   // 应用布局
   applyLayout()
+
+  // 重置视图，确保图谱居中
+  setTimeout(() => {
+    if (svg) {
+      svg.transition().call(zoom.transform, d3.zoomIdentity)
+    }
+  }, 500)
 }
 
 // 应用布局
@@ -763,20 +813,27 @@ onUnmounted(() => {
 
   .graph-container {
     display: grid;
-    grid-template-columns: 320px 1fr;
-    gap: 24px;
-    height: calc(100vh - 220px);
+    grid-template-columns: 280px 1fr 280px;
+    gap: 20px;
+    height: calc(100vh - 180px);
+    max-height: 800px;
 
-    @media (max-width: 768px) {
+    @media (max-width: 1200px) {
+      grid-template-columns: 260px 1fr 260px;
+    }
+
+    @media (max-width: 992px) {
       grid-template-columns: 1fr;
       height: auto;
+      max-height: none;
     }
   }
 
-  .graph-sidebar {
+  .left-panel,
+  .right-panel {
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 20px;
 
     .card {
       background: white;
@@ -825,9 +882,14 @@ onUnmounted(() => {
           margin-bottom: 10px;
           font-size: 13px;
           color: #606266;
+          cursor: pointer;
+          padding: 4px 8px;
+          border-radius: 4px;
+          transition: all 0.3s ease;
           
           &:hover {
             color: #303133;
+            background: #f5f7fa;
           }
 
           .legend-color {
@@ -871,21 +933,40 @@ onUnmounted(() => {
           }
         }
       }
+
+      .tips {
+        .tip-item {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          margin-bottom: 12px;
+          font-size: 13px;
+          color: #606266;
+          
+          svg {
+            flex-shrink: 0;
+            margin-top: 2px;
+            color: #409eff;
+          }
+        }
+      }
     }
   }
 
   .graph-main {
     position: relative;
-    background: #fafafa;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    background: linear-gradient(135deg, #f5f7fa 0%, #e4e8f0 100%);
+    border-radius: 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
 
     .graph-canvas {
       width: 100%;
       height: 100%;
-      min-height: 600px;
       position: relative;
+      flex: 1;
 
       .loading-overlay {
         position: absolute;

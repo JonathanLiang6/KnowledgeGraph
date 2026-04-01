@@ -517,11 +517,11 @@ onMounted(() => {
     display: grid;
     grid-template-columns: 1fr 320px;
     gap: 24px;
-    height: calc(100vh - 220px);
+    height: calc(100vh - 180px);
 
     @media (max-width: 768px) {
       grid-template-columns: 1fr;
-      height: auto;
+      height: calc(100vh - 180px);
     }
   }
 
@@ -536,16 +536,34 @@ onMounted(() => {
 
   .chat-messages {
     flex: 1;
-    padding: 24px;
+    padding: 20px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 16px;
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+    
+    &::-webkit-scrollbar-track {
+      background: #f1f1f1;
+      border-radius: 3px;
+    }
+    
+    &::-webkit-scrollbar-thumb {
+      background: #c1c1c1;
+      border-radius: 3px;
+    }
+    
+    &::-webkit-scrollbar-thumb:hover {
+      background: #a8a8a8;
+    }
 
     .message {
       display: flex;
-      gap: 16px;
-      margin-bottom: 12px;
+      gap: 12px;
+      margin-bottom: 8px;
 
       &.user {
         flex-direction: row-reverse;
@@ -566,11 +584,11 @@ onMounted(() => {
             display: flex;
             align-items: center;
             gap: 12px;
-            padding: 20px;
+            padding: 16px;
           }
           .loading-spinner {
-            width: 24px;
-            height: 24px;
+            width: 20px;
+            height: 20px;
             border: 2px solid #f3f3f3;
             border-top: 2px solid #667eea;
             border-radius: 50%;
@@ -578,7 +596,7 @@ onMounted(() => {
           }
           .loading-text {
             color: #909399;
-            font-size: 14px;
+            font-size: 13px;
           }
         }
       }
@@ -587,8 +605,8 @@ onMounted(() => {
         flex-shrink: 0;
         
         .avatar {
-          width: 48px;
-          height: 48px;
+          width: 40px;
+          height: 40px;
           border-radius: 50%;
           display: flex;
           align-items: center;
@@ -607,7 +625,7 @@ onMounted(() => {
 
       .message-content {
         flex: 1;
-        padding: 20px;
+        padding: 16px;
         max-width: 80%;
         transition: all 0.3s ease;
         
@@ -619,34 +637,35 @@ onMounted(() => {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 12px;
+          margin-bottom: 8px;
           .message-author {
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 600;
             color: #303133;
           }
           .message-time {
-            font-size: 12px;
+            font-size: 11px;
             color: #909399;
           }
         }
 
         .message-body {
-          font-size: 14px;
-          line-height: 1.6;
+          font-size: 13px;
+          line-height: 1.5;
           color: #303133;
-          margin-bottom: 12px;
+          margin-bottom: 8px;
 
           p {
-            margin-bottom: 10px;
+            margin-bottom: 8px;
             &:last-child {
               margin-bottom: 0;
             }
           }
 
           h1, h2, h3, h4, h5, h6 {
-            margin: 15px 0 10px 0;
+            margin: 12px 0 8px 0;
             color: #303133;
+            font-size: 14px;
           }
 
           code {
@@ -654,15 +673,15 @@ onMounted(() => {
             padding: 2px 4px;
             border-radius: 4px;
             font-family: 'Courier New', Courier, monospace;
-            font-size: 12px;
+            font-size: 11px;
           }
 
           pre {
             background: #f0f0f0;
-            padding: 12px;
-            border-radius: 8px;
+            padding: 10px;
+            border-radius: 6px;
             overflow-x: auto;
-            margin: 10px 0;
+            margin: 8px 0;
             box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
           }
 
@@ -672,33 +691,34 @@ onMounted(() => {
           }
 
           ul, ol {
-            margin: 10px 0;
-            padding-left: 20px;
+            margin: 8px 0;
+            padding-left: 16px;
           }
 
           li {
-            margin-bottom: 5px;
+            margin-bottom: 4px;
+            font-size: 12px;
           }
         }
 
         .message-actions {
           display: flex;
-          gap: 8px;
-          margin-top: 8px;
-          padding-top: 12px;
+          gap: 6px;
+          margin-top: 6px;
+          padding-top: 8px;
           border-top: 1px solid #f0f2f5;
           
           .action-btn {
             background: none;
             border: 1px solid #dcdfe6;
             border-radius: 4px;
-            padding: 4px 8px;
-            font-size: 12px;
+            padding: 3px 6px;
+            font-size: 11px;
             color: #606266;
             cursor: pointer;
             display: flex;
             align-items: center;
-            gap: 4px;
+            gap: 3px;
             transition: all 0.3s ease;
             
             &:hover {
@@ -713,24 +733,24 @@ onMounted(() => {
   }
 
   .chat-input-area {
-    padding: 24px;
+    padding: 20px;
     border-top: 1px solid #f0f2f5;
     background: #fafafa;
 
     .input-wrapper {
       display: flex;
-      gap: 12px;
-      margin-bottom: 12px;
+      gap: 10px;
+      margin-bottom: 8px;
 
       textarea {
         flex: 1;
         border: 1px solid #dcdfe6;
         border-radius: 8px;
-        padding: 14px;
-        font-size: 14px;
+        padding: 12px;
+        font-size: 13px;
         resize: none;
-        min-height: 48px;
-        max-height: 200px;
+        min-height: 40px;
+        max-height: 150px;
         font-family: inherit;
         background: white;
         transition: all 0.3s ease;
@@ -744,7 +764,7 @@ onMounted(() => {
 
       .input-actions {
         display: flex;
-        gap: 10px;
+        gap: 8px;
         align-items: flex-end;
       }
     }
@@ -752,8 +772,8 @@ onMounted(() => {
     .chat-tips {
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-size: 12px;
+      gap: 6px;
+      font-size: 11px;
       color: #909399;
 
       .tip {
@@ -765,17 +785,36 @@ onMounted(() => {
   .chat-sidebar {
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 16px;
+    overflow-y: auto;
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+    
+    &::-webkit-scrollbar-track {
+      background: #f1f1f1;
+      border-radius: 3px;
+    }
+    
+    &::-webkit-scrollbar-thumb {
+      background: #c1c1c1;
+      border-radius: 3px;
+    }
+    
+    &::-webkit-scrollbar-thumb:hover {
+      background: #a8a8a8;
+    }
 
     @media (max-width: 768px) {
-      margin-top: 24px;
+      margin-top: 16px;
     }
 
     .card {
       background: white;
       border-radius: 12px;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-      padding: 20px;
+      padding: 16px;
       transition: all 0.3s ease;
       
       &:hover {
@@ -786,10 +825,10 @@ onMounted(() => {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 16px;
+        margin-bottom: 12px;
         
         h3 {
-          font-size: 16px;
+          font-size: 14px;
           font-weight: 600;
           color: #303133;
           margin: 0;
@@ -799,8 +838,8 @@ onMounted(() => {
           background: none;
           border: 1px solid #dcdfe6;
           border-radius: 4px;
-          padding: 4px 8px;
-          font-size: 12px;
+          padding: 3px 6px;
+          font-size: 11px;
           color: #606266;
           cursor: pointer;
           transition: all 0.3s ease;
@@ -814,46 +853,42 @@ onMounted(() => {
       }
 
       h3 {
-        font-size: 16px;
+        font-size: 14px;
         font-weight: 600;
-        margin-bottom: 16px;
+        margin-bottom: 12px;
         color: #303133;
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
       }
 
       .mode-selector {
-        margin-bottom: 12px;
+        margin-bottom: 8px;
       }
 
       .history-list {
-        max-height: 220px;
+        max-height: 180px;
         overflow-y: auto;
         
         &::-webkit-scrollbar {
-          width: 6px;
+          width: 4px;
         }
         
         &::-webkit-scrollbar-track {
           background: #f1f1f1;
-          border-radius: 3px;
+          border-radius: 2px;
         }
         
         &::-webkit-scrollbar-thumb {
           background: #c1c1c1;
-          border-radius: 3px;
-        }
-        
-        &::-webkit-scrollbar-thumb:hover {
-          background: #a8a8a8;
+          border-radius: 2px;
         }
 
         .history-item {
-          padding: 12px;
-          border-radius: 8px;
+          padding: 10px;
+          border-radius: 6px;
           cursor: pointer;
-          margin-bottom: 10px;
+          margin-bottom: 8px;
           transition: all 0.3s ease;
           border: 1px solid #f0f2f5;
 
@@ -864,15 +899,15 @@ onMounted(() => {
           }
 
           .history-question {
-            font-size: 13px;
+            font-size: 12px;
             color: #303133;
-            margin-bottom: 6px;
-            line-height: 1.4;
+            margin-bottom: 4px;
+            line-height: 1.3;
             font-weight: 500;
           }
 
           .history-time {
-            font-size: 11px;
+            font-size: 10px;
             color: #909399;
           }
         }
@@ -880,18 +915,18 @@ onMounted(() => {
         .empty-history {
           text-align: center;
           color: #909399;
-          font-size: 13px;
-          padding: 24px 0;
+          font-size: 12px;
+          padding: 16px 0;
         }
       }
 
       .recommended-questions {
         .recommended-question {
-          padding: 10px 14px;
-          border-radius: 8px;
+          padding: 8px 12px;
+          border-radius: 6px;
           cursor: pointer;
-          margin-bottom: 10px;
-          font-size: 13px;
+          margin-bottom: 8px;
+          font-size: 12px;
           color: #606266;
           background: #f5f7fa;
           transition: all 0.3s ease;
@@ -909,28 +944,28 @@ onMounted(() => {
       .chat-stats {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
-        gap: 12px;
+        gap: 8px;
         
         .stat-item {
           text-align: center;
           background: #f5f7fa;
-          padding: 16px;
-          border-radius: 8px;
+          padding: 12px;
+          border-radius: 6px;
           transition: all 0.3s ease;
           
           &:hover {
             background: #ecf5ff;
-            transform: translateY(-2px);
+            transform: translateY(-1px);
           }
           
           .stat-value {
-            font-size: 20px;
+            font-size: 16px;
             font-weight: 700;
             color: #667eea;
-            margin-bottom: 4px;
+            margin-bottom: 2px;
           }
           .stat-label {
-            font-size: 12px;
+            font-size: 11px;
             color: #909399;
           }
         }

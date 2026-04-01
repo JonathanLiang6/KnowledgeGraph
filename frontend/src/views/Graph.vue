@@ -172,7 +172,23 @@
 
       <!-- 右侧图谱可视化区域 -->
       <div class="graph-main">
-        <div class="graph-canvas" ref="graphCanvas"></div>
+        <div class="graph-canvas" ref="graphCanvas">
+          <!-- 加载状态 -->
+          <div v-if="loading" class="loading-overlay">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">加载图谱数据中...</div>
+          </div>
+          <!-- 加载错误提示 -->
+          <div v-else-if="loadError" class="error-overlay">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="error-icon">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <div class="error-text">图谱数据加载失败</div>
+            <div class="error-subtext">正在使用默认数据</div>
+          </div>
+        </div>
         <div class="graph-info" v-if="selectedNode">
           <div class="info-header">
             <h4>实体详情</h4>
@@ -223,6 +239,10 @@ import * as d3 from 'd3'
 // 图谱容器
 const graphCanvas = ref(null)
 
+// 加载状态
+const loading = ref(false)
+const loadError = ref(false)
+
 // 图谱数据
 const graphData = ref({
   nodes: [
@@ -232,8 +252,9 @@ const graphData = ref({
     { id: 4, name: '智能问答', type: 'application', description: '基于知识图谱的问答系统' },
     { id: 5, name: '推荐系统', type: 'application', description: '利用知识图谱提升推荐质量' },
     { id: 6, name: 'GraphRAG', type: 'tool', description: '基于图的检索增强生成' },
-    { id: 7, name: 'Neo4j', type: 'database', description: '图数据库' },
-    { id: 8, name: '智谱AI', type: 'technology', description: '大语言模型' }
+    { id: 7, name: 'FastAPI', type: 'technology', description: 'Web框架' },
+    { id: 8, name: 'SQLite', type: 'database', description: '轻量级数据库' },
+    { id: 9, name: '智谱AI', type: 'technology', description: '大语言模型' }
   ],
   links: [
     { source: 1, target: 2, type: 'has_part', label: '包含' },
@@ -241,8 +262,9 @@ const graphData = ref({
     { source: 1, target: 4, type: 'used_in', label: '应用于' },
     { source: 1, target: 5, type: 'used_in', label: '应用于' },
     { source: 6, target: 1, type: 'uses', label: '使用' },
-    { source: 7, target: 1, type: 'stores', label: '存储' },
-    { source: 8, target: 6, type: 'powers', label: '驱动' }
+    { source: 7, target: 1, type: 'powers', label: '驱动' },
+    { source: 8, target: 1, type: 'stores', label: '存储' },
+    { source: 9, target: 6, type: 'powers', label: '驱动' }
   ]
 })
 
@@ -274,8 +296,8 @@ const relationshipTypes = ref([
 
 // 图谱统计
 const graphStats = ref({
-  nodes: 8,
-  edges: 7,
+  nodes: 9,
+  edges: 8,
   types: 5,
   density: 0.25
 })
@@ -285,6 +307,49 @@ let simulation = null
 let svg = null
 let zoom = null
 let container = null
+
+// 加载图谱数据
+const loadGraphData = async () => {
+  loading.value = true
+  loadError.value = false
+  
+  try {
+    // 尝试从后端API加载数据
+    const response = await fetch('/api/graph/data')
+    if (response.ok) {
+      const data = await response.json()
+      if (data.nodes && data.links) {
+        graphData.value = data
+        updateGraphStats()
+      }
+    } else {
+      // 加载失败，使用默认数据
+      console.warn('Failed to load graph data, using default data')
+      loadError.value = true
+    }
+  } catch (error) {
+    // 网络错误，使用默认数据
+    console.error('Error loading graph data:', error)
+    loadError.value = true
+  } finally {
+    loading.value = false
+  }
+}
+
+// 更新图谱统计
+const updateGraphStats = () => {
+  const nodes = graphData.value.nodes.length
+  const edges = graphData.value.links.length
+  const types = new Set(graphData.value.nodes.map(node => node.type)).size
+  const density = edges / (nodes * (nodes - 1)) || 0
+  
+  graphStats.value = {
+    nodes,
+    edges,
+    types,
+    density
+  }
+}
 
 // 初始化图谱
 const initGraph = () => {
@@ -535,7 +600,9 @@ const selectNode = (nodeId) => {
 
 // 刷新图谱
 const refreshGraph = () => {
-  initGraph()
+  loadGraphData().then(() => {
+    initGraph()
+  })
 }
 
 // 放大
@@ -622,7 +689,9 @@ const updateNodeSize = () => {
 }
 
 onMounted(() => {
-  initGraph()
+  loadGraphData().then(() => {
+    initGraph()
+  })
   window.addEventListener('resize', initGraph)
 })
 
@@ -816,6 +885,67 @@ onUnmounted(() => {
       width: 100%;
       height: 100%;
       min-height: 600px;
+      position: relative;
+
+      .loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.8);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 100;
+
+        .loading-spinner {
+          width: 40px;
+          height: 40px;
+          border: 4px solid #f3f3f3;
+          border-top: 4px solid #667eea;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-bottom: 16px;
+        }
+
+        .loading-text {
+          font-size: 14px;
+          color: #606266;
+        }
+      }
+
+      .error-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.8);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 100;
+
+        .error-icon {
+          color: #f56c6c;
+          margin-bottom: 16px;
+        }
+
+        .error-text {
+          font-size: 16px;
+          font-weight: 500;
+          color: #f56c6c;
+          margin-bottom: 8px;
+        }
+
+        .error-subtext {
+          font-size: 14px;
+          color: #909399;
+        }
+      }
     }
 
     .graph-info {
@@ -985,5 +1115,10 @@ onUnmounted(() => {
     opacity: 1;
     transform: translateX(0);
   }
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 </style>

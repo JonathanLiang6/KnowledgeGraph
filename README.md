@@ -1,11 +1,11 @@
 # 知识图谱系统
 
-基于 GraphRAG 技术的知识图谱系统，使用智谱AI进行实体和关系提取，Neo4j作为图数据库存储。
+基于 GraphRAG 技术的知识图谱系统，使用智谱AI进行实体和关系提取，SQLite作为数据库存储。
 
 ## 项目特性
 
-- **智能问答**：基于知识图谱的智能问答系统
-- **图谱可视化**：交互式知识图谱可视化展示
+- **智能问答**：基于知识图谱的智能问答系统，支持上下文理解
+- **图谱可视化**：交互式知识图谱可视化展示，支持多种布局
 - **文档管理**：支持多种格式文档的上传、处理和管理
 - **系统设置**：灵活的系统配置和API管理
 - **响应式设计**：支持多设备访问
@@ -14,8 +14,9 @@
 
 - **前端**：Vue 3 + Element Plus + D3.js
 - **后端**：FastAPI + Python
-- **数据库**：Neo4j
-- **AI服务**：智谱AI
+- **数据库**：SQLite
+- **AI服务**：智谱AI (GLM-4系列模型)
+- **知识图谱**：GraphRAG
 
 ## 快速开始
 
@@ -23,7 +24,6 @@
 
 - Node.js 16+ （前端）
 - Python 3.8+ （后端）
-- Neo4j 4.0+ （图数据库）
 
 ### 安装步骤
 
@@ -31,7 +31,7 @@
 
 ```bash
 git clone <repository-url>
-cd graphTest
+cd KnowledgeGraph
 ```
 
 2. **安装前端依赖**
@@ -44,7 +44,7 @@ npm install
 3. **安装后端依赖**
 
 ```bash
-cd ../ragtest
+cd ../backend
 pip install -r requirements.txt
 ```
 
@@ -54,47 +54,49 @@ pip install -r requirements.txt
 
 ```env
 # 智谱AI API配置
-API_KEY=your-api-key
-API_BASE_URL=https://open.bigmodel.cn/api/messages
-MODEL=glm-4
+GRAPHRAG_CHAT_API_KEY=your-api-key
+GRAPHRAG_API_BASE=https://open.bigmodel.cn/api/paas/v4
+GRAPHRAG_CHAT_MODEL=glm-4-air
+GRAPHRAG_EMBEDDING_MODEL=embedding-3
 
-# Neo4j数据库配置
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USERNAME=neo4j
-NEO4J_PASSWORD=your-password
+# 系统配置
+GRAPHRAG_INPUT_DIR=input
+GRAPHRAG_OUTPUT_DIR=output
 ```
 
 5. **启动服务**
 
-使用一键启动脚本：
+分别启动前后端服务：
 
 ```bash
-# Windows
-start.bat
+# 启动后端
+cd backend
+python -m uvicorn utils.main:app --reload
 
-# Linux/Mac
-chmod +x start.sh
-./start.sh
+# 启动前端（新终端）
+cd frontend
+npm run dev
 ```
+
+访问 http://localhost:3000 即可使用系统。
 
 ## 项目结构
 
 ```
-graphTest/
-├── frontend/           # 前端项目
-│   ├── src/            # 源代码
-│   │   ├── views/      # 页面组件
-│   │   ├── router/     # 路由配置
-│   │   └── styles/     # 样式文件
-│   ├── package.json    # 前端依赖
-│   └── vite.config.js  # Vite配置
-├── ragtest/            # 后端项目
-│   ├── utils/          # 工具函数
-│   ├── models/         # 数据模型
-│   └── api/            # API接口
-├── start.bat           # Windows启动脚本
-├── start.sh            # Linux/Mac启动脚本
-└── README.md           # 项目说明
+KnowledgeGraph/
+├── frontend/              # 前端项目
+│   ├── src/
+│   │   ├── views/         # 页面组件
+│   │   ├── router/        # 路由配置
+│   │   └── styles/        # 样式文件
+│   ├── package.json       # 前端依赖
+│   └── vite.config.js     # Vite配置
+├── backend/               # 后端项目
+│   ├── utils/             # 工具函数
+│   ├── prompts/           # 提示词模板
+│   └── requirements.txt   # Python依赖
+├── .gitignore             # Git忽略文件
+└── README.md              # 项目说明
 ```
 
 ## 核心功能
@@ -108,7 +110,7 @@ graphTest/
 ### 2. 图谱可视化
 - 交互式知识图谱展示
 - 节点搜索和过滤
-- 多种布局选项
+- 多种布局选项（力导向、环形、树形、网格）
 - 图谱导出功能
 
 ### 3. 文档管理
@@ -118,10 +120,10 @@ graphTest/
 - 文档详情查看
 
 ### 4. 系统设置
-- API配置管理
-- 系统参数调整
-- 视觉设置
-- 数据管理
+- API配置管理（智谱AI）
+- 系统参数调整（批处理大小、文本块大小等）
+- 数据统计查看
+- 缓存管理
 
 ## 开发指南
 
@@ -129,15 +131,35 @@ graphTest/
 
 ```bash
 cd frontend
-npm run dev  # 启动开发服务器
+npm run dev  # 启动开发服务器，默认端口3000
 ```
 
 ### 后端开发
 
 ```bash
-cd ragtest
-uvicorn main:app --reload  # 启动开发服务器
+cd backend
+python -m uvicorn utils.main:app --reload  # 启动开发服务器，默认端口8000
 ```
+
+## API接口
+
+### 文件管理
+- `POST /api/files/upload` - 上传文件
+- `GET /api/files/list` - 获取文件列表
+- `GET /api/files/{file_id}` - 获取文件详情
+- `DELETE /api/files/{file_id}` - 删除文件
+- `POST /api/files/{file_id}/process` - 处理文件
+- `GET /api/files/{file_id}/download` - 下载文件
+
+### 系统设置
+- `GET /api/settings` - 获取系统设置
+- `POST /api/settings` - 保存系统设置
+- `POST /api/settings/clear-cache` - 清除缓存
+- `GET /api/settings/stats` - 获取数据统计
+
+### 图谱数据
+- `GET /api/graph/data` - 获取图谱数据
+- `GET /api/graph/search` - 搜索图谱实体
 
 ## 部署
 
@@ -150,7 +172,31 @@ npm run build
 
 2. **部署后端**
 
-可使用 Gunicorn + Nginx 部署后端服务。
+```bash
+cd backend
+pip install -r requirements.txt
+python -m uvicorn utils.main:app --host 0.0.0.0 --port 8000
+```
+
+## 配置说明
+
+### API配置
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| GRAPHRAG_CHAT_API_KEY | 智谱AI API密钥 | - |
+| GRAPHRAG_API_BASE | API基础地址 | https://open.bigmodel.cn/api/paas/v4 |
+| GRAPHRAG_CHAT_MODEL | 对话模型 | glm-4-air |
+| GRAPHRAG_EMBEDDING_MODEL | 嵌入模型 | embedding-3 |
+
+### 系统参数
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| batchSize | 批处理大小 | 5 |
+| chunkSize | 文本块大小 | 1000 |
+| overlapRatio | 重叠比例 | 0.1 |
+| entityThreshold | 实体阈值 | 0.7 |
 
 ## 许可证
 

@@ -277,11 +277,33 @@ const sendMessage = async () => {
   scrollToBottom()
 
   try {
-    // 模拟API调用
-    await new Promise(resolve => setTimeout(resolve, 1500))
+    // 调用后端API
+    const model = searchMode.value === 'local' ? 'graphrag-local-search:latest' : 
+                 searchMode.value === 'global' ? 'graphrag-global-search:latest' : 'full-model:latest'
     
-    // 生成回答
-    const answer = getMockAnswer(question)
+    const response = await fetch('http://localhost:8013/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          {
+            role: 'user',
+            content: question
+          }
+        ],
+        stream: false
+      })
+    })
+    
+    if (!response.ok) {
+      throw new Error('API调用失败')
+    }
+    
+    const data = await response.json()
+    const answer = data.choices[0].message.content
     
     // 添加助手消息
     messages.value.push({

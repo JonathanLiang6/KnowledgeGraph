@@ -150,7 +150,7 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 
 // 激活的选项卡
 const activeTab = ref('api')
@@ -159,8 +159,8 @@ const activeTab = ref('api')
 const showApiKey = ref(false)
 const apiSettings = reactive({
   apiKey: '',
-  apiBaseUrl: 'https://open.bigmodel.cn/api/messages',
-  model: 'glm-4',
+  apiBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+  model: 'glm-4-flash',
   timeout: 30
 })
 
@@ -183,10 +183,82 @@ const visualSettings = reactive({
 
 // 数据统计
 const dataStats = reactive({
-  documents: 12,
-  entities: 1568,
-  relationships: 2890,
-  storageUsed: '128 MB'
+  documents: 0,
+  entities: 0,
+  relationships: 0,
+  storageUsed: '0 MB'
+})
+
+// 加载系统设置
+const loadSettings = async () => {
+  try {
+    const response = await fetch('http://localhost:8013/api/settings')
+    if (!response.ok) {
+      throw new Error('获取系统设置失败')
+    }
+    const data = await response.json()
+    
+    // 更新API配置
+    if (data.api) {
+      apiSettings.apiKey = data.api.apiKey || ''
+      apiSettings.apiBaseUrl = data.api.apiBaseUrl || 'https://open.bigmodel.cn/api/paas/v4'
+      apiSettings.model = data.api.model || 'glm-4-flash'
+      apiSettings.timeout = data.api.timeout || 30
+    }
+    
+    // 更新系统参数
+    if (data.system) {
+      systemSettings.batchSize = data.system.batchSize || 5
+      systemSettings.chunkSize = data.system.chunkSize || 1000
+      systemSettings.overlapRatio = data.system.overlapRatio || 0.1
+      systemSettings.entityThreshold = data.system.entityThreshold || 0.7
+      systemSettings.relationThreshold = data.system.relationThreshold || 0.6
+    }
+    
+    // 更新数据统计
+    if (data.dataStats) {
+      dataStats.documents = data.dataStats.documents || 0
+      dataStats.entities = data.dataStats.entities || 0
+      dataStats.relationships = data.dataStats.relationships || 0
+      dataStats.storageUsed = data.dataStats.storageUsed || '0 MB'
+    }
+  } catch (error) {
+    console.error('加载系统设置失败:', error)
+  }
+}
+
+// 保存系统设置
+const saveAllSettings = async () => {
+  try {
+    const settings = {
+      api: apiSettings,
+      system: systemSettings,
+      visual: visualSettings
+    }
+    
+    const response = await fetch('http://localhost:8013/api/settings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(settings)
+    })
+    
+    if (!response.ok) {
+      throw new Error('保存设置失败')
+    }
+    
+    const data = await response.json()
+    showMessage(data.message || '设置保存成功')
+  } catch (error) {
+    console.error('保存设置失败:', error)
+    showMessage('保存设置失败')
+  }
+}
+
+// 组件挂载时加载设置
+onMounted(() => {
+  loadSettings()
 })
 
 // 确认对话框
@@ -251,13 +323,6 @@ const handleConfirmAction = () => {
   }
   confirmDialogVisible.value = false
   confirmAction = null
-}
-
-// 保存所有设置
-const saveAllSettings = () => {
-  console.log('保存所有设置:', { apiSettings, systemSettings, visualSettings })
-  // 这里可以添加保存逻辑
-  showMessage('所有设置保存成功')
 }
 
 // 显示消息

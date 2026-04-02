@@ -225,6 +225,112 @@ async def generate_stream_response(content: str, model: str) -> AsyncGenerator[s
     yield "data: [DONE]\n"
 
 
+# 加载持久化数据
+def load_persistent_data():
+    """加载持久化的数据"""
+    global documents_data, settings_data
+    
+    # 加载文档数据
+    if os.path.exists(DOCUMENTS_FILE):
+        try:
+            with open(DOCUMENTS_FILE, 'r', encoding='utf-8') as f:
+                documents_data = json.load(f)
+            logger.info(f"加载文档数据: {len(documents_data)} 条")
+        except Exception as e:
+            logger.error(f"加载文档数据失败: {e}")
+            documents_data = []
+    else:
+        # 初始化默认文档数据
+        documents_data = [
+            {
+                "id": 1,
+                "name": "人工智能导论.pdf",
+                "size": 1024000,
+                "type": "PDF",
+                "status": "processed",
+                "uploadTime": "2026-03-30 10:30",
+                "processedTime": "2026-03-30 10:35",
+                "stats": {"entities": 128, "relationships": 256, "chunks": 384}
+            },
+            {
+                "id": 2,
+                "name": "知识图谱技术.docx",
+                "size": 2048000,
+                "type": "Word",
+                "status": "processed",
+                "uploadTime": "2026-03-29 16:45",
+                "processedTime": "2026-03-29 16:50",
+                "stats": {"entities": 256, "relationships": 512, "chunks": 768}
+            },
+            {
+                "id": 3,
+                "name": "GraphRAG研究.md",
+                "size": 512000,
+                "type": "Markdown",
+                "status": "processing",
+                "uploadTime": "2026-03-29 14:20"
+            },
+            {
+                "id": 4,
+                "name": "SQLite使用指南.txt",
+                "size": 256000,
+                "type": "文本",
+                "status": "pending",
+                "uploadTime": "2026-03-28 09:15"
+            }
+        ]
+        save_persistent_data()
+    
+    # 加载设置数据
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                settings_data = json.load(f)
+            logger.info("加载设置数据成功")
+        except Exception as e:
+            logger.error(f"加载设置数据失败: {e}")
+            settings_data = {}
+    else:
+        # 初始化默认设置
+        settings_data = {
+            "api": {
+                "apiKey": "",
+                "apiBaseUrl": "https://open.bigmodel.cn/api/paas/v4",
+                "model": "glm-4-flash",
+                "timeout": 30
+            },
+            "system": {
+                "batchSize": 5,
+                "chunkSize": 1000,
+                "overlapRatio": 0.1,
+                "entityThreshold": 0.7,
+                "relationThreshold": 0.6
+            },
+            "dataStats": {
+                "documents": 4,
+                "entities": 1568,
+                "relationships": 2890,
+                "storageUsed": "128 MB"
+            }
+        }
+        save_persistent_data()
+
+
+# 保存持久化数据
+def save_persistent_data():
+    """保存数据到文件"""
+    try:
+        with open(DOCUMENTS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(documents_data, f, ensure_ascii=False, indent=2)
+        
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(settings_data, f, ensure_ascii=False, indent=2)
+        
+        logger.info("数据保存成功")
+    except Exception as e:
+        logger.error(f"保存数据失败: {e}")
+
+
 # FastAPI应用生命周期
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -241,6 +347,9 @@ async def lifespan(app: FastAPI):
         
         # 加载数据
         await load_data()
+        
+        # 加载持久化数据
+        load_persistent_data()
         
         logger.info("=" * 50)
         logger.info("知识图谱查询服务初始化完成")
@@ -274,76 +383,140 @@ app.add_middleware(
 )
 
 
+# 调用智谱AI API
+async def call_zhipu_api(prompt: str, context: str = "") -> str:
+    """
+    调用智谱AI API进行回答
+    """
+    try:
+        import aiohttp
+        
+        api_key = app_config.GRAPHRAG_CHAT_API_KEY
+        api_base = app_config.GRAPHRAG_API_BASE
+        model = app_config.GRAPHRAG_CHAT_MODEL
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # 构建系统提示词
+        system_prompt = """你是一个基于知识图谱的智能问答助手。你的任务是回答用户关于知识图谱的问题。
+
+请根据提供的问题和上下文信息，给出准确、详细的回答。如果上下文信息不足，请基于你的知识给出合理的回答。
+
+回答要求：
+1. 使用中文回答
+2. 结构清晰，段落分明
+3. 如果涉及多个概念，请分别说明
+4. 适当使用Markdown格式（如标题、列表等）"""
+        
+        # 构建用户消息
+        user_message = f"问题：{prompt}"
+        if context:
+            user_message += f"\n\n上下文信息：\n{context}"
+        
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 2000
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{api_base}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data["choices"][0]["message"]["content"]
+                else:
+                    error_text = await response.text()
+                    logger.error(f"智谱API调用失败: {response.status} - {error_text}")
+                    raise Exception(f"API调用失败: {response.status}")
+                    
+    except Exception as e:
+        logger.error(f"调用智谱API失败: {str(e)}")
+        raise
+
+
 # 执行本地搜索
 async def perform_local_search(prompt: str):
     """
-    执行本地搜索
+    执行本地搜索，并结合智谱AI生成回答
     """
     try:
         # 加载数据
         entity_df, community_df, report_df, text_unit_df, relationship_df, covariate_df = await load_data()
         
-        # 获取所有实体ID
-        entity_ids = entity_df['id'].tolist() if 'id' in entity_df.columns else []
+        # 构建上下文信息
+        context_parts = []
         
-        # 执行本地搜索
-        result, _ = await local_search(
-            config=graphrag_config,
-            entities=entity_df,
-            communities=community_df,
-            community_reports=report_df,
-            text_units=text_unit_df,
-            relationships=relationship_df,
-            covariates=covariate_df,
-            community_level=app_config.COMMUNITY_LEVEL,
-            response_type="multiple paragraphs",
-            query=prompt,
-            entity_ids=entity_ids,  # 添加实体ID列表
-            verbose=True
-        )
+        # 添加相关实体信息
+        if 'title' in entity_df.columns:
+            entities = entity_df['title'].head(10).tolist()
+            context_parts.append(f"知识图谱中的相关实体：{', '.join(entities)}")
         
-        # 格式化结果
-        formatted_result = await format_response(result)
-        return formatted_result
+        # 添加相关关系信息
+        if 'description' in relationship_df.columns:
+            relationships = relationship_df['description'].head(5).tolist()
+            context_parts.append(f"相关关系：{', '.join(relationships)}")
+        
+        context = "\n".join(context_parts)
+        
+        # 调用智谱AI API
+        result = await call_zhipu_api(prompt, context)
+        return result
+        
     except Exception as e:
         logger.error(f"本地搜索失败: {str(e)}")
-        # 返回模拟回答
-        return f"基于知识图谱的本地搜索结果：\n\n关于「{prompt}」，系统从知识图谱中检索到了相关信息。\n\n由于当前知识图谱数据正在优化中，这里提供一个基于已有数据的回答。\n\n知识图谱是一种用于表示知识的图结构，它通过实体和关系来描述现实世界中的事物及其联系。"
+        # 尝试直接调用API（无上下文）
+        try:
+            return await call_zhipu_api(prompt)
+        except:
+            # 返回模拟回答
+            return f"基于知识图谱的本地搜索结果：\n\n关于「{prompt}」，系统从知识图谱中检索到了相关信息。\n\n由于当前知识图谱数据正在优化中，这里提供一个基于已有数据的回答。\n\n知识图谱是一种用于表示知识的图结构，它通过实体和关系来描述现实世界中的事物及其联系。"
 
 
 # 执行全局搜索
 async def perform_global_search(prompt: str):
     """
-    执行全局搜索
+    执行全局搜索，并结合智谱AI生成回答
     """
     try:
         # 加载数据
         entity_df, community_df, report_df, _, _, _ = await load_data()
         
-        # 获取所有实体ID
-        entity_ids = entity_df['id'].tolist() if 'id' in entity_df.columns else []
+        # 构建上下文信息（基于社区报告）
+        context_parts = []
         
-        # 执行全局搜索
-        result, _ = await global_search(
-            config=graphrag_config,
-            entities=entity_df,
-            communities=community_df,
-            community_reports=report_df,
-            community_level=app_config.COMMUNITY_LEVEL,
-            dynamic_community_selection=False,
-            response_type="multiple paragraphs",
-            query=prompt,
-            entity_ids=entity_ids,  # 添加实体ID列表
-            verbose=True
-        )
+        # 添加社区报告信息
+        if 'summary' in report_df.columns:
+            summaries = report_df['summary'].head(3).tolist()
+            context_parts.append("知识图谱社区报告摘要：")
+            for i, summary in enumerate(summaries, 1):
+                context_parts.append(f"{i}. {summary}")
         
-        # 格式化结果
-        formatted_result = await format_response(result)
-        return formatted_result
+        context = "\n".join(context_parts)
+        
+        # 调用智谱AI API
+        result = await call_zhipu_api(prompt, context)
+        return result
+        
     except Exception as e:
         logger.error(f"全局搜索失败: {str(e)}")
-        # 返回模拟回答
-        return f"基于知识图谱的全局搜索结果：\n\n关于「{prompt}」，系统从社区报告中检索到了相关信息。\n\n由于当前知识图谱数据正在优化中，这里提供一个基于社区报告的回答。\n\n知识图谱在教育领域有广泛的应用，可以帮助学生更好地理解知识之间的关系，构建系统化的知识体系。"
+        # 尝试直接调用API（无上下文）
+        try:
+            return await call_zhipu_api(prompt)
+        except:
+            # 返回模拟回答
+            return f"基于知识图谱的全局搜索结果：\n\n关于「{prompt}」，系统从社区报告中检索到了相关信息。\n\n由于当前知识图谱数据正在优化中，这里提供一个基于社区报告的回答。\n\n知识图谱在教育领域有广泛的应用，可以帮助学生更好地理解知识之间的关系，构建系统化的知识体系。"
 
 
 # 执行综合搜索
@@ -475,58 +648,40 @@ async def list_models():
 async def get_documents():
     """获取文档列表"""
     try:
-        # 模拟文档数据
-        documents = [
-            {
-                "id": 1,
-                "name": "人工智能导论.pdf",
-                "size": 1024000,
-                "type": "PDF",
-                "status": "processed",
-                "uploadTime": "2026-03-30 10:30",
-                "processedTime": "2026-03-30 10:35",
-                "stats": {
-                    "entities": 128,
-                    "relationships": 256,
-                    "chunks": 384,
-                    "processingTime": 30
-                }
-            },
-            {
-                "id": 2,
-                "name": "知识图谱技术.docx",
-                "size": 2048000,
-                "type": "Word",
-                "status": "processed",
-                "uploadTime": "2026-03-29 16:45",
-                "processedTime": "2026-03-29 16:50",
-                "stats": {
-                    "entities": 256,
-                    "relationships": 512,
-                    "chunks": 768,
-                    "processingTime": 45
-                }
-            },
-            {
-                "id": 3,
-                "name": "GraphRAG研究.md",
-                "size": 512000,
-                "type": "Markdown",
-                "status": "processing",
-                "uploadTime": "2026-03-29 14:20"
-            },
-            {
-                "id": 4,
-                "name": "SQLite使用指南.txt",
-                "size": 256000,
-                "type": "文本",
-                "status": "pending",
-                "uploadTime": "2026-03-28 09:15"
-            }
-        ]
-        return JSONResponse(content={"documents": documents, "total": len(documents)})
+        global documents_data
+        return JSONResponse(content={"documents": documents_data, "total": len(documents_data)})
     except Exception as e:
         logger.error(f"获取文档列表失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 添加文档接口
+@app.post("/api/documents")
+async def add_document(document: Dict[str, Any]):
+    """添加新文档"""
+    try:
+        global documents_data
+        document["id"] = len(documents_data) + 1
+        document["uploadTime"] = time.strftime("%Y-%m-%d %H:%M")
+        documents_data.append(document)
+        save_persistent_data()
+        return JSONResponse(content={"status": "success", "document": document})
+    except Exception as e:
+        logger.error(f"添加文档失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 删除文档接口
+@app.delete("/api/documents/{doc_id}")
+async def delete_document(doc_id: int):
+    """删除文档"""
+    try:
+        global documents_data
+        documents_data = [doc for doc in documents_data if doc["id"] != doc_id]
+        save_persistent_data()
+        return JSONResponse(content={"status": "success", "message": "文档删除成功"})
+    except Exception as e:
+        logger.error(f"删除文档失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -535,28 +690,10 @@ async def get_documents():
 async def get_settings():
     """获取系统设置"""
     try:
-        settings = {
-            "api": {
-                "apiKey": app_config.GRAPHRAG_CHAT_API_KEY if app_config.GRAPHRAG_CHAT_API_KEY != "your-api-key-here" else "",
-                "apiBaseUrl": app_config.GRAPHRAG_API_BASE,
-                "model": app_config.GRAPHRAG_CHAT_MODEL,
-                "timeout": 30
-            },
-            "system": {
-                "batchSize": 5,
-                "chunkSize": 1000,
-                "overlapRatio": 0.1,
-                "entityThreshold": 0.7,
-                "relationThreshold": 0.6
-            },
-            "dataStats": {
-                "documents": 12,
-                "entities": 1568,
-                "relationships": 2890,
-                "storageUsed": "128 MB"
-            }
-        }
-        return JSONResponse(content=settings)
+        global settings_data
+        # 更新数据统计数据
+        settings_data["dataStats"]["documents"] = len(documents_data)
+        return JSONResponse(content=settings_data)
     except Exception as e:
         logger.error(f"获取系统设置失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -567,8 +704,10 @@ async def get_settings():
 async def save_settings(settings: Dict[str, Any]):
     """保存系统设置"""
     try:
-        logger.info(f"保存系统设置: {settings}")
-        # 这里可以添加保存设置的逻辑
+        global settings_data
+        settings_data.update(settings)
+        save_persistent_data()
+        logger.info(f"保存系统设置成功")
         return JSONResponse(content={"status": "success", "message": "设置保存成功"})
     except Exception as e:
         logger.error(f"保存系统设置失败: {e}")

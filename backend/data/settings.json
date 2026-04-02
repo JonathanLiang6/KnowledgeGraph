@@ -17,5 +17,10 @@
     "primaryColor": "#667eea",
     "fontSize": "medium",
     "animations": true
+  },
+  "dataStats": {
+    "documents": 0,
+    "entities": 0,
+    "relationships": 0
   }
 }

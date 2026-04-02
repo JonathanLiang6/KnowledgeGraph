@@ -271,6 +271,66 @@ def preprocess_text(text):
     
     return processed_sentences
 
+# 实体类型识别
+import re
+
+# 实体类型模式
+ENTITY_PATTERNS = {
+    'person': [
+        r'[\u4e00-\u9fa5]{2,4}(?:先生|女士|博士|教授|工程师|设计师)',
+        r'(?:Mr|Ms|Mrs|Dr|Prof)\.\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*'
+    ],
+    'organization': [
+        r'[\u4e00-\u9fa5]{2,10}(?:公司|企业|集团|机构|组织|协会|学会|大学|学院|研究所)',
+        r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s+Company|Corporation|Group|Institution|Organization|Association|University|College|Institute)'
+    ],
+    'concept': [
+        r'[\u4e00-\u9fa5]{2,8}(?:概念|理论|方法|技术|思想|理念)',
+        r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s+Concept|Theory|Method|Technology|Idea|Philosophy)'
+    ],
+    'event': [
+        r'[\u4e00-\u9fa5]{2,10}(?:事件|会议|活动|比赛|展览|研讨会|论坛)',
+        r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s+Event|Meeting|Activity|Competition|Exhibition|Seminar|Forum)'
+    ],
+    'data': [
+        r'\d+(?:\.\d+)?(?:%|万|亿|元|美元|人民币|kg|m|cm|mm|秒|分钟|小时|天|月|年)',
+        r'\d+(?:,\d{3})*(?:\.\d+)?(?:\s+%|\s+million|\s+billion|\s+dollar|\s+yuan|\s+kg|\s+m|\s+cm|\s+mm|\s+second|\s+minute|\s+hour|\s+day|\s+month|\s+year)'
+    ],
+    'technology': [
+        r'[\u4e00-\u9fa5]{2,8}(?:技术|算法|系统|平台|框架|工具|软件|硬件)',
+        r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s+Technology|Algorithm|System|Platform|Framework|Tool|Software|Hardware)'
+    ],
+    'product': [
+        r'[\u4e00-\u9fa5]{2,10}(?:产品|设备|工具|系统|软件|硬件|服务)',
+        r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s+Product|Device|Tool|System|Software|Hardware|Service)'
+    ],
+    'location': [
+        r'[\u4e00-\u9fa5]{2,10}(?:省|市|区|县|街道|路|街|巷|村|镇|乡|国|国家|城市|地区)',
+        r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s+Province|City|District|County|Street|Road|Village|Town|Country|Region)'
+    ],
+    'time': [
+        r'\d{4}年(?:\d{1,2}月)?(?:\d{1,2}日)?',
+        r'\d{1,2}月\d{1,2}日',
+        r'\d{4}-\d{1,2}-\d{1,2}',
+        r'\d{2}:\d{2}(?::\d{2})?',
+        r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}(?:,\s+\d{4})?',
+        r'\d{4}/\d{1,2}/\d{1,2}'
+    ]
+}
+
+# 关系类型模式
+RELATION_PATTERNS = {
+    '包含': [r'包含|包括|涵盖|包含有|包括有|涵盖有'],
+    '因果': [r'导致|引起|造成|使得|因为|由于|所以|因此'],
+    '从属': [r'属于|隶属|归属于|是...的一部分|属于...的一部分'],
+    '对立': [r'相反|对立|反对|冲突|矛盾|相反的|对立的'],
+    '依赖': [r'依赖|依靠|依赖于|依靠于|需要|依赖关系'],
+    '影响': [r'影响|作用|效果|影响到|作用于|效果是'],
+    '属性': [r'是|具有|拥有|具备|特征是|特性是'],
+    '关联': [r'关联|相关|有关|与...相关|与...有关'],
+    '对比': [r'比较|对比|相比|与...相比|与...比较']
+}
+
 # 实体抽取
 def extract_entities(text):
     """实体抽取"""
@@ -287,16 +347,37 @@ def extract_entities(text):
     # 构建实体列表
     entities = []
     entity_id = 1
+    entity_names = set()
+    
     for keyword, weight in keywords:
+        # 跳过重复实体
+        if keyword in entity_names:
+            continue
+        
+        # 识别实体类型
+        entity_type = identify_entity_type(keyword, text)
+        
         entities.append({
             "id": str(entity_id),
             "name": keyword,
-            "type": "entity",
+            "type": entity_type,
             "weight": weight
         })
+        entity_names.add(keyword)
         entity_id += 1
     
     return entities, processed_sentences
+
+# 识别实体类型
+def identify_entity_type(entity, context):
+    """识别实体类型"""
+    # 按优先级检查实体类型
+    for entity_type, patterns in ENTITY_PATTERNS.items():
+        for pattern in patterns:
+            if re.search(pattern, entity) or re.search(pattern, context):
+                return entity_type
+    # 默认类型
+    return "concept"
 
 # 关系抽取
 def extract_relationships(entities, processed_sentences):
@@ -322,6 +403,9 @@ def extract_relationships(entities, processed_sentences):
                 distance = abs(i - j)
                 weight = 1.0 / (distance + 1)
                 
+                # 识别关系类型
+                relation_type = identify_relationship_type(sentence_entities[i], sentence_entities[j], sentence)
+                
                 # 检查是否已经存在相同的关系
                 exists = False
                 for rel in relationships:
@@ -337,13 +421,23 @@ def extract_relationships(entities, processed_sentences):
                         "id": str(relationship_id),
                         "source": source,
                         "target": target,
-                        "relation": "关联",
+                        "relation": relation_type,
                         "value": weight,
                         "sentence": sentence
                     })
                     relationship_id += 1
     
     return relationships
+
+# 识别关系类型
+def identify_relationship_type(source_entity, target_entity, context):
+    """识别关系类型"""
+    for relation_type, patterns in RELATION_PATTERNS.items():
+        for pattern in patterns:
+            if re.search(pattern, context):
+                return relation_type
+    # 默认关系类型
+    return "关联"
 
 # 读取文件内容
 def read_file_content(file_path):
@@ -383,6 +477,19 @@ def read_file_content(file_path):
         logger.error(f"读取文件失败: {e}")
         return f"读取文件失败: {str(e)}"
 
+# 实体类型颜色映射
+ENTITY_COLORS = {
+    'person': '#667eea',      # 蓝色
+    'organization': '#764ba2', # 紫色
+    'concept': '#f093fb',      # 粉色
+    'event': '#4facfe',        # 浅蓝色
+    'data': '#43e97b',         # 绿色
+    'technology': '#fa709a',   # 红色
+    'product': '#fee140',      # 黄色
+    'location': '#00b4db',     # 青色
+    'time': '#0083b0'          # 深蓝色
+}
+
 # 构建知识图谱
 def build_knowledge_graph(file_path):
     """构建知识图谱"""
@@ -396,6 +503,9 @@ def build_knowledge_graph(file_path):
         # 关系抽取
         relationships = extract_relationships(entities, processed_sentences)
         
+        # 优化图谱结构，减少冗余（适度丰富，不过度冗余）
+        entities, relationships = optimize_graph(entities, relationships)
+        
         # 转换为前端需要的格式
         nodes = []
         for entity in entities:
@@ -403,7 +513,8 @@ def build_knowledge_graph(file_path):
                 "id": entity["id"],
                 "name": entity["name"],
                 "type": entity["type"],
-                "value": int(entity["weight"] * 10)
+                "value": int(entity["weight"] * 10),
+                "color": ENTITY_COLORS.get(entity["type"], "#999")
             })
         
         links = []
@@ -412,18 +523,101 @@ def build_knowledge_graph(file_path):
                 "source": rel["source"],
                 "target": rel["target"],
                 "relation": rel["relation"],
-                "value": rel["value"]
+                "value": rel["value"],
+                "label": rel["relation"]  # 前端需要label字段
             })
         
-        return {
+        # 生成图例
+        legend = [{
+            "color": color,
+            "entity_type": entity_type
+        } for entity_type, color in ENTITY_COLORS.items()]
+        
+        # 生成新格式的输出
+        formatted_output = {
+            "legend": legend,
             "nodes": nodes,
             "links": links,
             "entities_count": len(entities),
             "relationships_count": len(relationships)
         }
+        
+        return formatted_output
     except Exception as e:
         logger.error(f"构建知识图谱失败: {e}")
         raise
+
+# 优化图谱结构
+def optimize_graph(entities, relationships):
+    """优化图谱结构，实现适度丰富但不冗余"""
+    # 1. 过滤低权重实体（降低阈值以获取更多实体，实现适度丰富）
+    filtered_entities = [entity for entity in entities if entity["weight"] > 0.05]
+    
+    # 2. 限制实体数量，避免过度冗余
+    if len(filtered_entities) > 30:
+        filtered_entities = sorted(filtered_entities, key=lambda x: x["weight"], reverse=True)[:30]
+    
+    # 3. 构建新的实体映射
+    entity_map = {entity["name"]: entity["id"] for entity in filtered_entities}
+    
+    # 4. 过滤与保留实体无关的关系
+    filtered_relationships = []
+    for rel in relationships:
+        # 查找源实体和目标实体的名称
+        source_name = None
+        target_name = None
+        for entity in entities:
+            if entity["id"] == rel["source"]:
+                source_name = entity["name"]
+            if entity["id"] == rel["target"]:
+                target_name = entity["name"]
+        
+        # 检查实体是否在保留列表中
+        if source_name in entity_map and target_name in entity_map:
+            # 更新关系中的实体ID
+            rel["source"] = entity_map[source_name]
+            rel["target"] = entity_map[target_name]
+            filtered_relationships.append(rel)
+    
+    # 5. 限制关系数量，避免过度冗余
+    if len(filtered_relationships) > 50:
+        filtered_relationships = sorted(filtered_relationships, key=lambda x: x["value"], reverse=True)[:50]
+    
+    # 6. 重新分配实体ID
+    optimized_entities = []
+    new_entity_map = {}
+    for i, entity in enumerate(filtered_entities):
+        new_id = str(i + 1)
+        new_entity_map[entity["name"]] = new_id
+        optimized_entities.append({
+            "id": new_id,
+            "name": entity["name"],
+            "type": entity["type"],
+            "weight": entity["weight"]
+        })
+    
+    # 7. 更新关系中的实体ID
+    optimized_relationships = []
+    for i, rel in enumerate(filtered_relationships):
+        source_name = None
+        target_name = None
+        for entity in filtered_entities:
+            if entity["id"] == rel["source"]:
+                source_name = entity["name"]
+            if entity["id"] == rel["target"]:
+                target_name = entity["name"]
+        
+        if source_name and target_name:
+            optimized_relationships.append({
+                "id": str(i + 1),
+                "source": new_entity_map[source_name],
+                "target": new_entity_map[target_name],
+                "relation": rel["relation"],
+                "value": rel["value"],
+                "sentence": rel["sentence"]
+            })
+    
+    return optimized_entities, optimized_relationships
 
 # 扫描本地文件夹获取文件列表
 def scan_local_files():
@@ -1136,6 +1330,7 @@ async def get_graph_data():
             graph_data = build_knowledge_graph(file_path)
             
             return JSONResponse(content={
+                "legend": graph_data["legend"],
                 "nodes": graph_data["nodes"],
                 "links": graph_data["links"],
                 "total_nodes": len(graph_data["nodes"]),
@@ -1143,19 +1338,29 @@ async def get_graph_data():
             })
         else:
             # 没有已处理的文档，返回默认数据
+            # 生成默认图例
+            default_legend = [{
+                "color": color,
+                "entity_type": entity_type
+            } for entity_type, color in ENTITY_COLORS.items()]
+            
+            # 为默认节点添加颜色
+            default_nodes = [
+                {"id": "1", "name": "知识图谱", "type": "concept", "value": 10, "color": ENTITY_COLORS.get("concept", "#999")},
+                {"id": "2", "name": "实体", "type": "concept", "value": 8, "color": ENTITY_COLORS.get("concept", "#999")},
+                {"id": "3", "name": "关系", "type": "concept", "value": 8, "color": ENTITY_COLORS.get("concept", "#999")},
+                {"id": "4", "name": "GraphRAG", "type": "technology", "value": 6, "color": ENTITY_COLORS.get("technology", "#999")},
+                {"id": "5", "name": "人工智能", "type": "concept", "value": 7, "color": ENTITY_COLORS.get("concept", "#999")}
+            ]
+            
             return JSONResponse(content={
-                "nodes": [
-                    {"id": "1", "name": "知识图谱", "type": "概念", "value": 10},
-                    {"id": "2", "name": "实体", "type": "概念", "value": 8},
-                    {"id": "3", "name": "关系", "type": "概念", "value": 8},
-                    {"id": "4", "name": "GraphRAG", "type": "技术", "value": 6},
-                    {"id": "5", "name": "人工智能", "type": "领域", "value": 7}
-                ],
+                "legend": default_legend,
+                "nodes": default_nodes,
                 "links": [
-                    {"source": "1", "target": "2", "relation": "包含", "value": 1.0},
-                    {"source": "1", "target": "3", "relation": "包含", "value": 1.0},
-                    {"source": "4", "target": "1", "relation": "基于", "value": 0.8},
-                    {"source": "5", "target": "4", "relation": "应用", "value": 0.7}
+                    {"source": "1", "target": "2", "relation": "包含", "value": 1.0, "label": "包含"},
+                    {"source": "1", "target": "3", "relation": "包含", "value": 1.0, "label": "包含"},
+                    {"source": "4", "target": "1", "relation": "基于", "value": 0.8, "label": "基于"},
+                    {"source": "5", "target": "4", "relation": "应用", "value": 0.7, "label": "应用"}
                 ],
                 "total_nodes": 5,
                 "total_links": 4
@@ -1163,19 +1368,27 @@ async def get_graph_data():
     except Exception as e:
         logger.error(f"获取图谱数据失败: {e}")
         # 返回默认数据
+        default_legend = [{
+            "color": color,
+            "entity_type": entity_type
+        } for entity_type, color in ENTITY_COLORS.items()]
+        
+        default_nodes = [
+            {"id": "1", "name": "知识图谱", "type": "concept", "value": 10, "color": ENTITY_COLORS.get("concept", "#999")},
+            {"id": "2", "name": "实体", "type": "concept", "value": 8, "color": ENTITY_COLORS.get("concept", "#999")},
+            {"id": "3", "name": "关系", "type": "concept", "value": 8, "color": ENTITY_COLORS.get("concept", "#999")},
+            {"id": "4", "name": "GraphRAG", "type": "technology", "value": 6, "color": ENTITY_COLORS.get("technology", "#999")},
+            {"id": "5", "name": "人工智能", "type": "concept", "value": 7, "color": ENTITY_COLORS.get("concept", "#999")}
+        ]
+        
         return JSONResponse(content={
-            "nodes": [
-                {"id": "1", "name": "知识图谱", "type": "概念", "value": 10},
-                {"id": "2", "name": "实体", "type": "概念", "value": 8},
-                {"id": "3", "name": "关系", "type": "概念", "value": 8},
-                {"id": "4", "name": "GraphRAG", "type": "技术", "value": 6},
-                {"id": "5", "name": "人工智能", "type": "领域", "value": 7}
-            ],
+            "legend": default_legend,
+            "nodes": default_nodes,
             "links": [
-                {"source": "1", "target": "2", "relation": "包含", "value": 1.0},
-                {"source": "1", "target": "3", "relation": "包含", "value": 1.0},
-                {"source": "4", "target": "1", "relation": "基于", "value": 0.8},
-                {"source": "5", "target": "4", "relation": "应用", "value": 0.7}
+                {"source": "1", "target": "2", "relation": "包含", "value": 1.0, "label": "包含"},
+                {"source": "1", "target": "3", "relation": "包含", "value": 1.0, "label": "包含"},
+                {"source": "4", "target": "1", "relation": "基于", "value": 0.8, "label": "基于"},
+                {"source": "5", "target": "4", "relation": "应用", "value": 0.7, "label": "应用"}
             ],
             "total_nodes": 5,
             "total_links": 4

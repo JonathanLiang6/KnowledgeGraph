@@ -1,0 +1,21 @@
+{
+  "api": {
+    "apiKey": "17784fc5c5c440d090f268a31ae5359c.Ddl2iFE5IQnt5cUW",
+    "apiBaseUrl": "https://open.bigmodel.cn/api/paas/v4",
+    "model": "glm-4-flash",
+    "timeout": 30
+  },
+  "system": {
+    "batchSize": 5,
+    "chunkSize": 1000,
+    "overlapRatio": 0.05,
+    "entityThreshold": 0.7,
+    "relationThreshold": 0.6
+  },
+  "visual": {
+    "theme": "light",
+    "primaryColor": "#667eea",
+    "fontSize": "medium",
+    "animations": true
+  }
+}

@@ -1,7 +1,5 @@
-"""
-GraphRAG知识图谱构建配置文件
-用于配置知识图谱索引构建的各项参数
-"""
+# GraphRAG知识图谱构建配置文件
+# 用于配置知识图谱索引构建的各项参数
 
 # 编码模型设置
 encoding_model: cl100k_base
@@ -15,9 +13,8 @@ llm:
   model_supports_json: true                    # 是否支持JSON输出
   max_tokens: 2000                             # 最大token数
   api_base: ${GRAPHRAG_API_BASE}              # API基础地址
-  # request_timeout: 180.0                      # 请求超时时间
-  # max_retries: 10                             # 最大重试次数
-  # concurrent_requests: 25                     # 并发请求数
+  max_retries: 10                              # 最大重试次数
+  concurrent_requests: 25                      # 并发请求数
 
 # ==================== 并行化配置 ====================
 parallelization:
@@ -33,8 +30,8 @@ embeddings:
     type: openai_embedding                     # 嵌入类型
     model: ${GRAPHRAG_EMBEDDING_MODEL}        # 嵌入模型
     api_base: ${GRAPHRAG_API_BASE}            # API基础地址
-    # max_retries: 10                           # 最大重试次数
-    # batch_size: 16                            # 批处理大小
+    max_retries: 10                           # 最大重试次数
+    batch_size: 16                            # 批处理大小
 
 # ==================== 文本分块配置 ====================
 chunks:
@@ -47,7 +44,7 @@ input:
   file_type: text                             # 文件类型
   base_dir: ${GRAPHRAG_INPUT_DIR}             # 输入目录
   file_encoding: utf-8                        # 文件编码
-  file_pattern: ".*\\.txt$"                   # 文件匹配模式
+  file_pattern: '*.{txt,md,docx,pdf}'          # 支持的文件格式
   multiple_files: true                        # 是否支持多文件
 
 # ==================== 缓存配置 ====================
@@ -145,19 +142,19 @@ snapshots:
 
 # ==================== 本地搜索配置 ====================
 local_search:
-  # text_unit_prop: 0.5
-  # community_prop: 0.1
-  # conversation_history_max_turns: 5
-  # top_k_mapped_entities: 10
-  # top_k_relationships: 10
-  # max_tokens: 12000
+  text_unit_prop: 0.5
+  community_prop: 0.1
+  conversation_history_max_turns: 5
+  top_k_mapped_entities: 10
+  top_k_relationships: 10
+  max_tokens: 12000
 
 # ==================== 全局搜索配置 ====================
 global_search:
-  # llm_temperature: 0
-  # llm_top_p: 1
-  # max_tokens: 12000
-  # data_max_tokens: 12000
-  # map_max_tokens: 1000
-  # reduce_max_tokens: 2000
-  # concurrency: 32
+  llm_temperature: 0
+  llm_top_p: 1
+  max_tokens: 12000
+  data_max_tokens: 12000
+  map_max_tokens: 1000
+  reduce_max_tokens: 2000
+  concurrency: 32

@@ -27,9 +27,10 @@
       </div>
     </div>
 
+    <!-- 图谱区域 -->
     <div class="graph-container">
       <!-- 左侧控制面板 -->
-      <div class="graph-sidebar">
+      <div class="left-panel">
         <div class="card">
           <h3>控制面板</h3>
           
@@ -126,7 +127,69 @@
             </button>
           </div>
         </div>
+      </div>
 
+      <!-- 中间图谱可视化区域 -->
+      <div class="graph-main">
+        <div class="graph-canvas" ref="graphCanvas">
+          <!-- 加载状态 -->
+          <div v-if="loading" class="loading-overlay">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">加载图谱数据中...</div>
+          </div>
+          <!-- 加载错误提示 -->
+          <div v-else-if="loadError" class="error-overlay">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="error-icon">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <div class="error-text">图谱数据加载失败</div>
+            <div class="error-subtext">正在使用默认数据</div>
+          </div>
+        </div>
+        <div class="graph-info" v-if="selectedNode">
+          <div class="info-header">
+            <h4>实体详情</h4>
+            <button class="close-btn" @click="selectedNode = null">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+          <div class="node-details">
+            <div class="detail-item">
+              <span class="label">名称：</span>
+              <span class="value">{{ selectedNode.name }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="label">类型：</span>
+              <span class="value" :style="{ color: getNodeColor(selectedNode.type) }">{{ selectedNode.type }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="label">描述：</span>
+              <span class="value">{{ selectedNode.description || '无' }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="label">相关实体：</span>
+              <div class="related-entities">
+                <span 
+                  v-for="(related, index) in selectedNode.related" 
+                  :key="index" 
+                  class="related-tag"
+                  @click="selectNode(related.id)"
+                >
+                  {{ related.name }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧信息面板 -->
+      <div class="right-panel">
         <!-- 图例 -->
         <div class="card">
           <h3>图例</h3>
@@ -168,46 +231,42 @@
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- 右侧图谱可视化区域 -->
-      <div class="graph-main">
-        <div class="graph-canvas" ref="graphCanvas"></div>
-        <div class="graph-info" v-if="selectedNode">
-          <div class="info-header">
-            <h4>实体详情</h4>
-            <button class="close-btn" @click="selectedNode = null">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
+        <!-- 操作提示 -->
+        <div class="card">
+          <h3>操作提示</h3>
+          <div class="tips">
+            <div class="tip-item">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
               </svg>
-            </button>
-          </div>
-          <div class="node-details">
-            <div class="detail-item">
-              <span class="label">名称：</span>
-              <span class="value">{{ selectedNode.name }}</span>
+              <span>点击节点查看详情</span>
             </div>
-            <div class="detail-item">
-              <span class="label">类型：</span>
-              <span class="value" :style="{ color: getNodeColor(selectedNode.type) }">{{ selectedNode.type }}</span>
+            <div class="tip-item">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+              <span>拖拽节点调整位置</span>
             </div>
-            <div class="detail-item">
-              <span class="label">描述：</span>
-              <span class="value">{{ selectedNode.description || '无' }}</span>
+            <div class="tip-item">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+              <span>滚轮缩放视图</span>
             </div>
-            <div class="detail-item">
-              <span class="label">相关实体：</span>
-              <div class="related-entities">
-                <span 
-                  v-for="(related, index) in selectedNode.related" 
-                  :key="index" 
-                  class="related-tag"
-                  @click="selectNode(related.id)"
-                >
-                  {{ related.name }}
-                </span>
-              </div>
+            <div class="tip-item">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+              <span>点击图例筛选实体</span>
             </div>
           </div>
         </div>
@@ -223,6 +282,10 @@ import * as d3 from 'd3'
 // 图谱容器
 const graphCanvas = ref(null)
 
+// 加载状态
+const loading = ref(false)
+const loadError = ref(false)
+
 // 图谱数据
 const graphData = ref({
   nodes: [
@@ -232,8 +295,9 @@ const graphData = ref({
     { id: 4, name: '智能问答', type: 'application', description: '基于知识图谱的问答系统' },
     { id: 5, name: '推荐系统', type: 'application', description: '利用知识图谱提升推荐质量' },
     { id: 6, name: 'GraphRAG', type: 'tool', description: '基于图的检索增强生成' },
-    { id: 7, name: 'Neo4j', type: 'database', description: '图数据库' },
-    { id: 8, name: '智谱AI', type: 'technology', description: '大语言模型' }
+    { id: 7, name: 'FastAPI', type: 'technology', description: 'Web框架' },
+    { id: 8, name: 'SQLite', type: 'database', description: '轻量级数据库' },
+    { id: 9, name: '智谱AI', type: 'technology', description: '大语言模型' }
   ],
   links: [
     { source: 1, target: 2, type: 'has_part', label: '包含' },
@@ -241,8 +305,9 @@ const graphData = ref({
     { source: 1, target: 4, type: 'used_in', label: '应用于' },
     { source: 1, target: 5, type: 'used_in', label: '应用于' },
     { source: 6, target: 1, type: 'uses', label: '使用' },
-    { source: 7, target: 1, type: 'stores', label: '存储' },
-    { source: 8, target: 6, type: 'powers', label: '驱动' }
+    { source: 7, target: 1, type: 'powers', label: '驱动' },
+    { source: 8, target: 1, type: 'stores', label: '存储' },
+    { source: 9, target: 6, type: 'powers', label: '驱动' }
   ]
 })
 
@@ -274,8 +339,8 @@ const relationshipTypes = ref([
 
 // 图谱统计
 const graphStats = ref({
-  nodes: 8,
-  edges: 7,
+  nodes: 9,
+  edges: 8,
   types: 5,
   density: 0.25
 })
@@ -285,6 +350,49 @@ let simulation = null
 let svg = null
 let zoom = null
 let container = null
+
+// 加载图谱数据
+const loadGraphData = async () => {
+  loading.value = true
+  loadError.value = false
+  
+  try {
+    // 尝试从后端API加载数据
+    const response = await fetch('http://localhost:8013/api/graph/data')
+    if (response.ok) {
+      const data = await response.json()
+      if (data.nodes && data.links) {
+        graphData.value = data
+        updateGraphStats()
+      }
+    } else {
+      // 加载失败，使用默认数据
+      console.warn('Failed to load graph data, using default data')
+      loadError.value = true
+    }
+  } catch (error) {
+    // 网络错误，使用默认数据
+    console.error('Error loading graph data:', error)
+    loadError.value = true
+  } finally {
+    loading.value = false
+  }
+}
+
+// 更新图谱统计
+const updateGraphStats = () => {
+  const nodes = graphData.value.nodes.length
+  const edges = graphData.value.links.length
+  const types = new Set(graphData.value.nodes.map(node => node.type)).size
+  const density = edges / (nodes * (nodes - 1)) || 0
+  
+  graphStats.value = {
+    nodes,
+    edges,
+    types,
+    density
+  }
+}
 
 // 初始化图谱
 const initGraph = () => {
@@ -316,6 +424,13 @@ const initGraph = () => {
 
   // 应用布局
   applyLayout()
+
+  // 重置视图，确保图谱居中
+  setTimeout(() => {
+    if (svg) {
+      svg.transition().call(zoom.transform, d3.zoomIdentity)
+    }
+  }, 500)
 }
 
 // 应用布局
@@ -535,7 +650,9 @@ const selectNode = (nodeId) => {
 
 // 刷新图谱
 const refreshGraph = () => {
-  initGraph()
+  loadGraphData().then(() => {
+    initGraph()
+  })
 }
 
 // 放大
@@ -622,7 +739,9 @@ const updateNodeSize = () => {
 }
 
 onMounted(() => {
-  initGraph()
+  loadGraphData().then(() => {
+    initGraph()
+  })
   window.addEventListener('resize', initGraph)
 })
 
@@ -694,20 +813,27 @@ onUnmounted(() => {
 
   .graph-container {
     display: grid;
-    grid-template-columns: 320px 1fr;
-    gap: 24px;
-    height: calc(100vh - 220px);
+    grid-template-columns: 280px 1fr 280px;
+    gap: 20px;
+    height: calc(100vh - 180px);
+    max-height: 800px;
 
-    @media (max-width: 768px) {
+    @media (max-width: 1200px) {
+      grid-template-columns: 260px 1fr 260px;
+    }
+
+    @media (max-width: 992px) {
       grid-template-columns: 1fr;
       height: auto;
+      max-height: none;
     }
   }
 
-  .graph-sidebar {
+  .left-panel,
+  .right-panel {
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 20px;
 
     .card {
       background: white;
@@ -756,9 +882,14 @@ onUnmounted(() => {
           margin-bottom: 10px;
           font-size: 13px;
           color: #606266;
+          cursor: pointer;
+          padding: 4px 8px;
+          border-radius: 4px;
+          transition: all 0.3s ease;
           
           &:hover {
             color: #303133;
+            background: #f5f7fa;
           }
 
           .legend-color {
@@ -802,20 +933,100 @@ onUnmounted(() => {
           }
         }
       }
+
+      .tips {
+        .tip-item {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          margin-bottom: 12px;
+          font-size: 13px;
+          color: #606266;
+          
+          svg {
+            flex-shrink: 0;
+            margin-top: 2px;
+            color: #409eff;
+          }
+        }
+      }
     }
   }
 
   .graph-main {
     position: relative;
-    background: #fafafa;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    background: linear-gradient(135deg, #f5f7fa 0%, #e4e8f0 100%);
+    border-radius: 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
 
     .graph-canvas {
       width: 100%;
       height: 100%;
-      min-height: 600px;
+      position: relative;
+      flex: 1;
+
+      .loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.8);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 100;
+
+        .loading-spinner {
+          width: 40px;
+          height: 40px;
+          border: 4px solid #f3f3f3;
+          border-top: 4px solid #667eea;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-bottom: 16px;
+        }
+
+        .loading-text {
+          font-size: 14px;
+          color: #606266;
+        }
+      }
+
+      .error-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.8);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 100;
+
+        .error-icon {
+          color: #f56c6c;
+          margin-bottom: 16px;
+        }
+
+        .error-text {
+          font-size: 16px;
+          font-weight: 500;
+          color: #f56c6c;
+          margin-bottom: 8px;
+        }
+
+        .error-subtext {
+          font-size: 14px;
+          color: #909399;
+        }
+      }
     }
 
     .graph-info {
@@ -985,5 +1196,10 @@ onUnmounted(() => {
     opacity: 1;
     transform: translateX(0);
   }
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 </style>

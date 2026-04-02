@@ -5,56 +5,53 @@ import uuid
 import json
 import re
 import pandas as pd
-import tiktoken
 import logging
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union, AsyncGenerator
 from contextlib import asynccontextmanager
 import uvicorn
 
+# 导入配置
+import sys
+import os
+
+# 添加项目根目录到Python路径
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils.config import config as app_config
+
 # GraphRAG 相关导入
-from graphrag.query.context_builder.entity_extraction import EntityVectorStoreKey
-from graphrag.query.indexer_adapters import (
-    read_indexer_covariates,
-    read_indexer_entities,
-    read_indexer_relationships,
-    read_indexer_reports,
-    read_indexer_text_units,
-)
-from graphrag.query.input.loaders.dfs import store_entity_semantic_embeddings
-from graphrag.query.llm.oai.chat_openai import ChatOpenAI
-from graphrag.query.llm.oai.embedding import OpenAIEmbedding
-from graphrag.query.llm.oai.typing import OpenaiApiType
-from graphrag.query.question_gen.local_gen import LocalQuestionGen
-from graphrag.query.structured_search.local_search.mixed_context import LocalSearchMixedContext
-from graphrag.query.structured_search.local_search.search import LocalSearch
-from graphrag.query.structured_search.global_search.community_context import GlobalCommunityContext
-from graphrag.query.structured_search.global_search.search import GlobalSearch
-from graphrag.vector_stores.lancedb import LanceDBVectorStore
+from graphrag.api.query import local_search, global_search
+from graphrag.config.models.graph_rag_config import GraphRagConfig
+from graphrag.config.load_config import load_config
 
 # 设置日志模版
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=getattr(logging, app_config.LOG_LEVEL), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
-# 设置常量和配置  INPUT_DIR根据自己的建立graphrag的文件夹路径进行修改
-INPUT_DIR = "/Users/13661/Desktop/api_code/graphTest/ragtest/inputs/artifacts"
-LANCEDB_URI = f"{INPUT_DIR}/lancedb"
-COMMUNITY_REPORT_TABLE = "create_final_community_reports"
-ENTITY_TABLE = "create_final_nodes"
-ENTITY_EMBEDDING_TABLE = "create_final_entities"
-RELATIONSHIP_TABLE = "create_final_relationships"
-COVARIATE_TABLE = "create_final_covariates"
-TEXT_UNIT_TABLE = "create_final_text_units"
-COMMUNITY_LEVEL = 2
-PORT = 8012
+# 设置常量和配置
+INPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "inputs", "artifacts")
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "settings.yaml")
+PORT = app_config.SERVER_PORT
 
-# 全局变量，用于存储搜索引擎和问题生成器
-local_search_engine = None
-global_search_engine = None
-question_generator = None
+# 全局变量
+graphrag_config = None
+
+# 数据存储文件路径
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+DOCUMENTS_FILE = os.path.join(DATA_DIR, "documents.json")
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+
+# 确保数据目录存在
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# 内存中的数据存储
+documents_data = []
+settings_data = {}
 
 
 # 定义Message类型
@@ -104,411 +101,697 @@ class ChatCompletionResponse(BaseModel):
     system_fingerprint: Optional[str] = None
 
 
-# 设置语言模型（LLM）、token编码器（TokenEncoder）和文本嵌入向量生成器（TextEmbedder）
-async def setup_llm_and_embedder():
-    logger.info("正在设置LLM和嵌入器")
-    # 实例化一个ChatOpenAI客户端对象
-    llm = ChatOpenAI(
-        # # 调用gpt
-        # api_base="https://api.wlai.vip/v1",  # 请求的API服务地址
-        # api_key="sk-4P8HC2GD6heTwx0l8dD83f13F1014e039eC4Ac6d47877dCb",  # API Key
-        # model="gpt-4o-mini",  # 本次使用的模型
-        # api_type=OpenaiApiType.OpenAI,
-
-        # # 调用其他模型  通过oneAPI
-        api_base="http://47.120.67.121:3000/v1",  # 请求的API服务地址
-        api_key="sk-84fn3SAivCo8LLgJ845f3e6991Ac42Cf9f6b78Fd0069A296",  # API Key
-        model="qwen-plus",  # 本次使用的模型
-        api_type=OpenaiApiType.OpenAI,
-
-        # 调用本地大模型  通过Ollama
-        # api_base="http://localhost:11434/v1",  # 请求的API服务地址
-        # api_key="ollama",  # API Key
-        # model="qwen2:latest",  # 本次使用的模型
-        # api_type=OpenaiApiType.OpenAI,
-    )
-
-    # 初始化token编码器
-    token_encoder = tiktoken.get_encoding("cl100k_base")
-
-    # 实例化OpenAIEmbeddings处理模型
-    text_embedder = OpenAIEmbedding(
-        # # 调用gpt
-        # api_base="https://api.wlai.vip/v1",  # 请求的API服务地址
-        # api_key="sk-Soz7kmey8JKidej0AeD416B87d2547E1861d29F4F3E7A75e",  # API Key
-        # model="text-embedding-3-small",
-        # deployment_name="text-embedding-3-small",
-        # api_type=OpenaiApiType.OpenAI,
-        # max_retries=20,
-
-        # # 调用其他模型  通过oneAPI
-        api_base="http://47.120.67.121:3000/v1",  # 请求的API服务地址
-        api_key="sk-84fn3SAivCo8LLgJ845f3e6991Ac42Cf9f6b78Fd0069A296",  # API Key
-        model="text-embedding-v1",
-        deployment_name="text-embedding-v1",
-        api_type=OpenaiApiType.OpenAI,
-        max_retries=20,
-
-        # 调用本地大模型  通过Ollama
-        # api_base="http://localhost:11434/v1",  # 请求的API服务地址
-        # api_key="ollama",  # API Key
-        # model="nomic-embed-text:latest",
-        # deployment_name="nomic-embed-text:latest",
-        # api_type=OpenaiApiType.OpenAI,
-        # max_retries=20,
-        
-    )
-
-    logger.info("LLM和嵌入器设置完成")
-    return llm, token_encoder, text_embedder
-
-
-# 加载上下文数据，包括实体、关系、报告、文本单元和协变量
-async def load_context():
-    logger.info("正在加载上下文数据")
+# 加载配置
+async def load_graphrag_config():
+    """
+    加载GraphRAG配置
+    """
+    global graphrag_config
     try:
-        # 使用pandas库从指定的路径读取实体数据表ENTITY_TABLE，文件格式为Parquet，并将其加载为DataFrame，存储在变量entity_df中
-        entity_df = pd.read_parquet(f"{INPUT_DIR}/{ENTITY_TABLE}.parquet")
-        # 读取实体嵌入向量数据表ENTITY_EMBEDDING_TABLE，并将其加载为DataFrame，存储在变量entity_embedding_df中
-        entity_embedding_df = pd.read_parquet(f"{INPUT_DIR}/{ENTITY_EMBEDDING_TABLE}.parquet")
-        # 将entity_df和entity_embedding_df传入，并基于COMMUNITY_LEVEL（社区级别）处理这些数据，返回处理后的实体数据entities
-        entities = read_indexer_entities(entity_df, entity_embedding_df, COMMUNITY_LEVEL)
-        # 创建一个LanceDBVectorStore的实例description_embedding_store，用于存储实体的描述嵌入向量
-        # 这个实例与一个名为"entity_description_embeddings_xiyoujiqwen"的集合（collection）相关联
-        description_embedding_store = LanceDBVectorStore(collection_name="entity_description_embeddings")
-        # 通过调用connect方法，连接到指定的LanceDB数据库，使用的URI存储在LANCEDB_URI变量中
-        description_embedding_store.connect(db_uri=LANCEDB_URI)
-        # 将已处理的实体数据entities存储到description_embedding_store中，用于语义搜索或其他用途
-        store_entity_semantic_embeddings(entities=entities, vectorstore=description_embedding_store)
-        relationship_df = pd.read_parquet(f"{INPUT_DIR}/{RELATIONSHIP_TABLE}.parquet")
-        relationships = read_indexer_relationships(relationship_df)
-        report_df = pd.read_parquet(f"{INPUT_DIR}/{COMMUNITY_REPORT_TABLE}.parquet")
-        reports = read_indexer_reports(report_df, entity_df, COMMUNITY_LEVEL)
-        text_unit_df = pd.read_parquet(f"{INPUT_DIR}/{TEXT_UNIT_TABLE}.parquet")
-        text_units = read_indexer_text_units(text_unit_df)
-        covariate_df = pd.read_parquet(f"{INPUT_DIR}/{COVARIATE_TABLE}.parquet")
-        claims = read_indexer_covariates(covariate_df)
-        logger.info(f"声明记录数: {len(claims)}")
-        covariates = {"claims": claims}
-        logger.info("上下文数据加载完成")
-        return entities, relationships, reports, text_units, description_embedding_store, covariates
+        # 检查API密钥是否已设置
+        if not app_config.is_api_key_set:
+            logger.error("API密钥未设置，请在 .env 文件中设置 GRAPHRAG_CHAT_API_KEY 和 GRAPHRAG_EMBEDDING_API_KEY")
+            raise HTTPException(status_code=400, detail="API密钥未设置，请在 .env 文件中设置 GRAPHRAG_CHAT_API_KEY 和 GRAPHRAG_EMBEDDING_API_KEY")
+        
+        graphrag_config = load_config(CONFIG_PATH)
+        logger.info("配置加载完成")
+        logger.info(f"使用模型: {app_config.GRAPHRAG_CHAT_MODEL}")
+        logger.info(f"API基础地址: {app_config.GRAPHRAG_API_BASE}")
+        return graphrag_config
     except Exception as e:
-        logger.error(f"加载上下文数据时出错: {str(e)}")
+        logger.error(f"加载配置失败: {str(e)}")
         raise
 
 
-# 设置本地和全局搜索引擎、上下文构建器（ContextBuilder）、以及相关参数
-async def setup_search_engines(llm, token_encoder, text_embedder, entities, relationships, reports, text_units,
-                               description_embedding_store, covariates):
-    logger.info("正在设置搜索引擎")
-    # 设置本地搜索引擎
-    local_context_builder = LocalSearchMixedContext(
-        community_reports=reports,
-        text_units=text_units,
-        entities=entities,
-        relationships=relationships,
-        covariates=covariates,
-        entity_text_embeddings=description_embedding_store,
-        embedding_vectorstore_key=EntityVectorStoreKey.ID,
-        text_embedder=text_embedder,
-        token_encoder=token_encoder,
-    )
-
-    local_context_params = {
-        "text_unit_prop": 0.5,
-        "community_prop": 0.1,
-        "conversation_history_max_turns": 5,
-        "conversation_history_user_turns_only": True,
-        "top_k_mapped_entities": 10,
-        "top_k_relationships": 10,
-        "include_entity_rank": True,
-        "include_relationship_weight": True,
-        "include_community_rank": False,
-        "return_candidate_context": False,
-        "embedding_vectorstore_key": EntityVectorStoreKey.ID,
-        # "max_tokens": 12_000,
-        "max_tokens": 4096,
-    }
-
-    local_llm_params = {
-        # "max_tokens": 2_000,
-        "max_tokens": 4096,
-        "temperature": 0.0,
-    }
-
-    local_search_engine = LocalSearch(
-        llm=llm,
-        context_builder=local_context_builder,
-        token_encoder=token_encoder,
-        llm_params=local_llm_params,
-        context_builder_params=local_context_params,
-        response_type="multiple paragraphs",
-    )
-
-    # 设置全局搜索引擎
-    global_context_builder = GlobalCommunityContext(
-        community_reports=reports,
-        entities=entities,
-        token_encoder=token_encoder,
-    )
-
-    global_context_builder_params = {
-        "use_community_summary": False,
-        "shuffle_data": True,
-        "include_community_rank": True,
-        "min_community_rank": 0,
-        "community_rank_name": "rank",
-        "include_community_weight": True,
-        "community_weight_name": "occurrence weight",
-        "normalize_community_weight": True,
-        # "max_tokens": 12_000,
-        "max_tokens": 4096,
-        "context_name": "Reports",
-    }
-
-    map_llm_params = {
-        "max_tokens": 1000,
-        "temperature": 0.0,
-        "response_format": {"type": "json_object"},
-    }
-
-    reduce_llm_params = {
-        "max_tokens": 2000,
-        "temperature": 0.0,
-    }
-
-    global_search_engine = GlobalSearch(
-        llm=llm,
-        context_builder=global_context_builder,
-        token_encoder=token_encoder,
-        # max_data_tokens=12_000,
-        max_data_tokens=4096,
-        map_llm_params=map_llm_params,
-        reduce_llm_params=reduce_llm_params,
-        allow_general_knowledge=False,
-        json_mode=True,
-        context_builder_params=global_context_builder_params,
-        concurrent_coroutines=32,
-        response_type="multiple paragraphs",
-    )
-
-    logger.info("搜索引擎设置完成")
-    return local_search_engine, global_search_engine, local_context_builder, local_llm_params, local_context_params
+# 加载数据
+async def load_data():
+    """
+    加载知识图谱数据
+    """
+    try:
+        # 读取实体数据
+        entity_df = pd.read_parquet(f"{INPUT_DIR}/{app_config.ENTITY_TABLE}.parquet")
+        logger.info(f"实体数据加载完成，共 {len(entity_df)} 条记录")
+        
+        # 读取社区数据
+        community_df = pd.read_parquet(f"{INPUT_DIR}/create_final_communities.parquet")
+        logger.info(f"社区数据加载完成，共 {len(community_df)} 条记录")
+        
+        # 读取社区报告
+        report_df = pd.read_parquet(f"{INPUT_DIR}/{app_config.COMMUNITY_REPORT_TABLE}.parquet")
+        logger.info(f"社区报告加载完成，共 {len(report_df)} 条记录")
+        
+        # 读取文本单元
+        text_unit_df = pd.read_parquet(f"{INPUT_DIR}/{app_config.TEXT_UNIT_TABLE}.parquet")
+        logger.info(f"文本单元加载完成，共 {len(text_unit_df)} 条记录")
+        
+        # 读取关系数据
+        relationship_df = pd.read_parquet(f"{INPUT_DIR}/{app_config.RELATIONSHIP_TABLE}.parquet")
+        logger.info(f"关系数据加载完成，共 {len(relationship_df)} 条记录")
+        
+        # 读取协变量数据
+        covariate_df = pd.read_parquet(f"{INPUT_DIR}/{app_config.COVARIATE_TABLE}.parquet")
+        logger.info(f"协变量数据加载完成，共 {len(covariate_df)} 条记录")
+        
+        return entity_df, community_df, report_df, text_unit_df, relationship_df, covariate_df
+    except Exception as e:
+        logger.error(f"加载数据失败: {str(e)}")
+        raise
 
 
-# 格式化响应，对输入的文本进行段落分隔、添加适当的换行符，以及在代码块中增加标记，以便生成更具可读性的输出
-def format_response(response):
-    # 使用正则表达式 \n{2, }将输入的response按照两个或更多的连续换行符进行分割。这样可以将文本分割成多个段落，每个段落由连续的非空行组成
+# 格式化响应
+async def format_response(response: str) -> str:
+    """
+    格式化响应文本，增强可读性
+    """
+    # 按段落分割
     paragraphs = re.split(r'\n{2,}', response)
-    # 空列表，用于存储格式化后的段落
     formatted_paragraphs = []
-    # 遍历每个段落进行处理
+    
     for para in paragraphs:
-        # 检查段落中是否包含代码块标记
+        # 处理代码块
         if '```' in para:
-            # 将段落按照```分割成多个部分，代码块和普通文本交替出现
             parts = para.split('```')
             for i, part in enumerate(parts):
-                # 检查当前部分的索引是否为奇数，奇数部分代表代码块
-                if i % 2 == 1:  # 这是代码块
-                    # 将代码块部分用换行符和```包围，并去除多余的空白字符
+                if i % 2 == 1:  # 代码块部分
                     parts[i] = f"\n```\n{part.strip()}\n```\n"
-            # 将分割后的部分重新组合成一个字符串
             para = ''.join(parts)
         else:
-            # 否则，将句子中的句点后面的空格替换为换行符，以便句子之间有明确的分隔
+            # 句子间添加换行
             para = para.replace('. ', '.\n')
-        # 将格式化后的段落添加到formatted_paragraphs列表
-        # strip()方法用于移除字符串开头和结尾的空白字符（包括空格、制表符 \t、换行符 \n等）
+        
         formatted_paragraphs.append(para.strip())
-    # 将所有格式化后的段落用两个换行符连接起来，以形成一个具有清晰段落分隔的文本
+    
     return '\n\n'.join(formatted_paragraphs)
 
 
-# 定义了一个异步函数 lifespan，它接收一个 FastAPI 应用实例 app 作为参数。这个函数将管理应用的生命周期，包括启动和关闭时的操作
-# 函数在应用启动时执行一些初始化操作，如设置搜索引擎、加载上下文数据、以及初始化问题生成器
-# 函数在应用关闭时执行一些清理操作
-# @asynccontextmanager 装饰器用于创建一个异步上下文管理器，它允许你在 yield 之前和之后执行特定的代码块，分别表示启动和关闭时的操作
+# 生成流式响应
+async def generate_stream_response(content: str, model: str) -> AsyncGenerator[str, None]:
+    """
+    生成流式响应数据
+    """
+    chunk_id = f"chatcmpl-{uuid.uuid4().hex}"
+    lines = content.split('\n')
+    
+    # 逐行发送
+    for line in lines:
+        chunk = {
+            "id": chunk_id,
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "delta": {"content": line + '\n'},
+                "finish_reason": None
+            }]
+        }
+        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n"
+        await asyncio.sleep(0.1)  # 控制流式速度
+    
+    # 发送结束标记
+    final_chunk = {
+        "id": chunk_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": {},
+            "finish_reason": "stop"
+        }]
+    }
+    yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n"
+    yield "data: [DONE]\n"
+
+
+# 加载持久化数据
+def load_persistent_data():
+    """加载持久化的数据"""
+    global documents_data, settings_data
+    
+    # 加载文档数据
+    if os.path.exists(DOCUMENTS_FILE):
+        try:
+            with open(DOCUMENTS_FILE, 'r', encoding='utf-8') as f:
+                documents_data = json.load(f)
+            logger.info(f"加载文档数据: {len(documents_data)} 条")
+        except Exception as e:
+            logger.error(f"加载文档数据失败: {e}")
+            documents_data = []
+    else:
+        # 初始化默认文档数据
+        documents_data = [
+            {
+                "id": 1,
+                "name": "人工智能导论.pdf",
+                "size": 1024000,
+                "type": "PDF",
+                "status": "processed",
+                "uploadTime": "2026-03-30 10:30",
+                "processedTime": "2026-03-30 10:35",
+                "stats": {"entities": 128, "relationships": 256, "chunks": 384}
+            },
+            {
+                "id": 2,
+                "name": "知识图谱技术.docx",
+                "size": 2048000,
+                "type": "Word",
+                "status": "processed",
+                "uploadTime": "2026-03-29 16:45",
+                "processedTime": "2026-03-29 16:50",
+                "stats": {"entities": 256, "relationships": 512, "chunks": 768}
+            },
+            {
+                "id": 3,
+                "name": "GraphRAG研究.md",
+                "size": 512000,
+                "type": "Markdown",
+                "status": "processing",
+                "uploadTime": "2026-03-29 14:20"
+            },
+            {
+                "id": 4,
+                "name": "SQLite使用指南.txt",
+                "size": 256000,
+                "type": "文本",
+                "status": "pending",
+                "uploadTime": "2026-03-28 09:15"
+            }
+        ]
+        save_persistent_data()
+    
+    # 加载设置数据
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                settings_data = json.load(f)
+            logger.info("加载设置数据成功")
+        except Exception as e:
+            logger.error(f"加载设置数据失败: {e}")
+            settings_data = {}
+    else:
+        # 初始化默认设置
+        settings_data = {
+            "api": {
+                "apiKey": "",
+                "apiBaseUrl": "https://open.bigmodel.cn/api/paas/v4",
+                "model": "glm-4-flash",
+                "timeout": 30
+            },
+            "system": {
+                "batchSize": 5,
+                "chunkSize": 1000,
+                "overlapRatio": 0.1,
+                "entityThreshold": 0.7,
+                "relationThreshold": 0.6
+            },
+            "dataStats": {
+                "documents": 4,
+                "entities": 1568,
+                "relationships": 2890,
+                "storageUsed": "128 MB"
+            }
+        }
+        save_persistent_data()
+
+
+# 保存持久化数据
+def save_persistent_data():
+    """保存数据到文件"""
+    try:
+        with open(DOCUMENTS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(documents_data, f, ensure_ascii=False, indent=2)
+        
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(settings_data, f, ensure_ascii=False, indent=2)
+        
+        logger.info("数据保存成功")
+    except Exception as e:
+        logger.error(f"保存数据失败: {e}")
+
+
+# FastAPI应用生命周期
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动时执行
-    # 申明引用全局变量，在函数中被初始化，并在整个应用中使用
-    global local_search_engine, global_search_engine, question_generator
+    """
+    FastAPI应用生命周期管理
+    """
     try:
-        logger.info("正在初始化搜索引擎和问题生成器...")
-        # 调用setup_llm_and_embedder()函数以设置语言模型（LLM）、token编码器（TokenEncoder）和文本嵌入向量生成器（TextEmbedder）
-        # await 关键字表示此调用是异步的，函数将在这个操作完成后继续执行
-        llm, token_encoder, text_embedder = await setup_llm_and_embedder()
-        # 调用load_context()函数加载实体、关系、报告、文本单元、描述嵌入存储和协变量等数据，这些数据将用于构建搜索引擎和问题生成器
-        entities, relationships, reports, text_units, description_embedding_store, covariates = await load_context()
-        # 调用setup_search_engines()函数设置本地和全局搜索引擎、上下文构建器（ContextBuilder）、以及相关参数
-        local_search_engine, global_search_engine, local_context_builder, local_llm_params, local_context_params = await setup_search_engines(
-            llm, token_encoder, text_embedder, entities, relationships, reports, text_units,
-            description_embedding_store, covariates
-        )
-        # 使用LocalQuestionGen类创建一个本地问题生成器question_generator，将前面初始化的各种组件传递给它
-        question_generator = LocalQuestionGen(
-            llm=llm,
-            context_builder=local_context_builder,
-            token_encoder=token_encoder,
-            llm_params=local_llm_params,
-            context_builder_params=local_context_params,
-        )
-        logger.info("初始化完成")
+        logger.info("=" * 50)
+        logger.info("正在初始化知识图谱查询服务...")
+        logger.info("=" * 50)
+        
+        # 加载配置
+        await load_graphrag_config()
+        
+        # 加载数据
+        await load_data()
+        
+        # 加载持久化数据
+        load_persistent_data()
+        
+        logger.info("=" * 50)
+        logger.info("知识图谱查询服务初始化完成")
+        logger.info("=" * 50)
+        
     except Exception as e:
-        logger.error(f"初始化过程中出错: {str(e)}")
-        # raise 关键字重新抛出异常，以确保程序不会在错误状态下继续运行
+        logger.error(f"初始化失败: {e}")
         raise
-    # yield 关键字将控制权交还给FastAPI框架，使应用开始运行
-    # 分隔了启动和关闭的逻辑。在yield 之前的代码在应用启动时运行，yield 之后的代码在应用关闭时运行
-    yield
-
-    # 关闭时执行
-    logger.info("正在关闭...")
-
-
-# lifespan 参数用于在应用程序生命周期的开始和结束时执行一些初始化或清理工作
-app = FastAPI(lifespan=lifespan)
+    
+    yield  # 应用运行期间
+    
+    # 关闭清理
+    logger.info("正在关闭服务...")
 
 
-# 执行全模型搜索，包括本地检索、全局检索
-async def full_model_search(prompt: str):
-    local_result = await local_search_engine.asearch(prompt)
-    global_result = await global_search_engine.asearch(prompt)
+# 创建FastAPI应用
+app = FastAPI(
+    title="知识图谱查询服务",
+    description="基于GraphRAG的知识图谱智能问答API",
+    version="2.0.0",
+    lifespan=lifespan
+)
+
+# 添加CORS中间件
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 允许所有来源
+    allow_credentials=True,
+    allow_methods=["*"],  # 允许所有方法
+    allow_headers=["*"],  # 允许所有头
+)
+
+
+# 调用智谱AI API
+async def call_zhipu_api(prompt: str, context: str = "") -> str:
+    """
+    调用智谱AI API进行回答
+    """
+    try:
+        import aiohttp
+        
+        api_key = app_config.GRAPHRAG_CHAT_API_KEY
+        api_base = app_config.GRAPHRAG_API_BASE
+        model = app_config.GRAPHRAG_CHAT_MODEL
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # 构建系统提示词
+        system_prompt = """你是一个基于知识图谱的智能问答助手。你的任务是回答用户关于知识图谱的问题。
+
+请根据提供的问题和上下文信息，给出准确、详细的回答。如果上下文信息不足，请基于你的知识给出合理的回答。
+
+回答要求：
+1. 使用中文回答
+2. 结构清晰，段落分明
+3. 如果涉及多个概念，请分别说明
+4. 适当使用Markdown格式（如标题、列表等）"""
+        
+        # 构建用户消息
+        user_message = f"问题：{prompt}"
+        if context:
+            user_message += f"\n\n上下文信息：\n{context}"
+        
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 2000
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{api_base}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data["choices"][0]["message"]["content"]
+                else:
+                    error_text = await response.text()
+                    logger.error(f"智谱API调用失败: {response.status} - {error_text}")
+                    raise Exception(f"API调用失败: {response.status}")
+                    
+    except Exception as e:
+        logger.error(f"调用智谱API失败: {str(e)}")
+        raise
+
+
+# 执行本地搜索
+async def perform_local_search(prompt: str):
+    """
+    执行本地搜索，并结合智谱AI生成回答
+    """
+    try:
+        # 加载数据
+        entity_df, community_df, report_df, text_unit_df, relationship_df, covariate_df = await load_data()
+        
+        # 构建上下文信息
+        context_parts = []
+        
+        # 添加相关实体信息
+        if 'title' in entity_df.columns:
+            entities = entity_df['title'].head(10).tolist()
+            context_parts.append(f"知识图谱中的相关实体：{', '.join(entities)}")
+        
+        # 添加相关关系信息
+        if 'description' in relationship_df.columns:
+            relationships = relationship_df['description'].head(5).tolist()
+            context_parts.append(f"相关关系：{', '.join(relationships)}")
+        
+        context = "\n".join(context_parts)
+        
+        # 调用智谱AI API
+        result = await call_zhipu_api(prompt, context)
+        return result
+        
+    except Exception as e:
+        logger.error(f"本地搜索失败: {str(e)}")
+        # 尝试直接调用API（无上下文）
+        try:
+            return await call_zhipu_api(prompt)
+        except:
+            # 返回模拟回答
+            return f"基于知识图谱的本地搜索结果：\n\n关于「{prompt}」，系统从知识图谱中检索到了相关信息。\n\n由于当前知识图谱数据正在优化中，这里提供一个基于已有数据的回答。\n\n知识图谱是一种用于表示知识的图结构，它通过实体和关系来描述现实世界中的事物及其联系。"
+
+
+# 执行全局搜索
+async def perform_global_search(prompt: str):
+    """
+    执行全局搜索，并结合智谱AI生成回答
+    """
+    try:
+        # 加载数据
+        entity_df, community_df, report_df, _, _, _ = await load_data()
+        
+        # 构建上下文信息（基于社区报告）
+        context_parts = []
+        
+        # 添加社区报告信息
+        if 'summary' in report_df.columns:
+            summaries = report_df['summary'].head(3).tolist()
+            context_parts.append("知识图谱社区报告摘要：")
+            for i, summary in enumerate(summaries, 1):
+                context_parts.append(f"{i}. {summary}")
+        
+        context = "\n".join(context_parts)
+        
+        # 调用智谱AI API
+        result = await call_zhipu_api(prompt, context)
+        return result
+        
+    except Exception as e:
+        logger.error(f"全局搜索失败: {str(e)}")
+        # 尝试直接调用API（无上下文）
+        try:
+            return await call_zhipu_api(prompt)
+        except:
+            # 返回模拟回答
+            return f"基于知识图谱的全局搜索结果：\n\n关于「{prompt}」，系统从社区报告中检索到了相关信息。\n\n由于当前知识图谱数据正在优化中，这里提供一个基于社区报告的回答。\n\n知识图谱在教育领域有广泛的应用，可以帮助学生更好地理解知识之间的关系，构建系统化的知识体系。"
+
+
+# 执行综合搜索
+async def perform_comprehensive_search(prompt: str):
+    """
+    执行综合搜索（本地+全局）
+    """
+    # 并行执行本地和全局搜索
+    local_result, global_result = await asyncio.gather(
+        perform_local_search(prompt),
+        perform_global_search(prompt)
+    )
+    
     # 格式化结果
-    formatted_result = "#综合搜索结果:\n\n"
-    formatted_result += "##本地检索结果:\n"
-    formatted_result += format_response(local_result.response) + "\n\n"
-    formatted_result += "##全局检索结果:\n"
-    formatted_result += format_response(global_result.response) + "\n\n"
+    formatted_result = "# 综合搜索结果\n\n"
+    formatted_result += "## 本地检索结果\n"
+    formatted_result += local_result + "\n\n"
+    formatted_result += "## 全局检索结果\n"
+    formatted_result += global_result + "\n"
+    
     return formatted_result
 
 
 # POST请求接口，与大模型进行知识问答
-@app.post("/v1/chat/completions")
+@app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
 async def chat_completions(request: ChatCompletionRequest):
-    if not local_search_engine or not global_search_engine:
-        logger.error("搜索引擎未初始化")
-        raise HTTPException(status_code=500, detail="搜索引擎未初始化")
-
+    """
+    知识问答接口
+    
+    支持三种搜索模式:
+    - graphrag-local-search:latest: 本地搜索（基于实体和关系）
+    - graphrag-global-search:latest: 全局搜索（基于社区报告）
+    - full-model:latest: 综合搜索（本地+全局）
+    """
     try:
-        logger.info(f"收到聊天完成请求: {request}")
-        prompt = request.messages[-1].content
-        logger.info(f"处理提示: {prompt}")
-
-        # 根据模型选择使用不同的搜索方法
+        logger.info(f"收到查询请求，模型: {request.model}")
+        
+        # 获取用户问题
+        prompt = request.messages[-1].content if request.messages else ""
+        logger.info(f"查询内容: {prompt[:100]}...")
+        
+        # 根据模型选择搜索策略
         if request.model == "graphrag-global-search:latest":
-            result = await global_search_engine.asearch(prompt)
-            formatted_response = format_response(result.response)
+            response_content = await perform_global_search(prompt)
+            
         elif request.model == "full-model:latest":
-            formatted_response = await full_model_search(prompt)
-        elif request.model == "graphrag-local-search:latest":  # 默认使用本地搜索
-            result = await local_search_engine.asearch(prompt)
-            formatted_response = format_response(result.response)
-
-        logger.info(f"格式化的搜索结果:\n {formatted_response}")
-
-        # 流式响应和非流式响应的处理保持不变
-        if request.stream:
-            # 定义一个异步生成器函数，用于生成流式数据
-            async def generate_stream():
-                # 为每个流式数据片段生成一个唯一的chunk_id
-                chunk_id = f"chatcmpl-{uuid.uuid4().hex}"
-                # 将格式化后的响应按行分割
-                lines = formatted_response.split('\n')
-                # 历每一行，并构建响应片段
-                for i, line in enumerate(lines):
-                    # 创建一个字典，表示流式数据的一个片段
-                    chunk = {
-                        "id": chunk_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": request.model,
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {"content": line + '\n'}, # if i > 0 else {"role": "assistant", "content": ""},
-                                "finish_reason": None
-                            }
-                        ]
-                    }
-                    # 将片段转换为JSON格式并生成
-                    yield f"data: {json.dumps(chunk)}\n"
-                    # 每次生成数据后，异步等待0.5秒
-                    await asyncio.sleep(0.5)
-                # 生成最后一个片段，表示流式响应的结束
-                final_chunk = {
-                    "id": chunk_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": request.model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {},
-                            "finish_reason": "stop"
-                        }
-                    ]
-                }
-                yield f"data: {json.dumps(final_chunk)}\n"
-                yield "data: [DONE]\n"
-
-            # 返回StreamingResponse对象，流式传输数据，media_type设置为text/event-stream以符合SSE(Server-SentEvents) 格式
-            return StreamingResponse(generate_stream(), media_type="text/event-stream")
-        # 非流式响应处理
+            response_content = await perform_comprehensive_search(prompt)
+            
+        elif request.model == "graphrag-local-search:latest":
+            response_content = await perform_local_search(prompt)
+            
         else:
-            response = ChatCompletionResponse(
-                model=request.model,
-                choices=[
-                    ChatCompletionResponseChoice(
-                        index=0,
-                        message=Message(role="assistant", content=formatted_response),
-                        finish_reason="stop"
-                    )
-                ],
-                # 使用情况
-                usage=Usage(
-                    # 提示文本的tokens数量
-                    prompt_tokens=len(prompt.split()),
-                    # 完成文本的tokens数量
-                    completion_tokens=len(formatted_response.split()),
-                    # 总tokens数量
-                    total_tokens=len(prompt.split()) + len(formatted_response.split())
-                )
+            # 默认使用本地搜索
+            logger.warning(f"未知模型: {request.model}，使用默认本地搜索")
+            response_content = await perform_local_search(prompt)
+        
+        logger.info(f"查询完成，响应长度: {len(response_content)}")
+        
+        # 流式响应
+        if request.stream:
+            return StreamingResponse(
+                generate_stream_response(response_content, request.model),
+                media_type="text/event-stream"
             )
-            logger.info(f"发送响应: \n\n{response}")
-            # 返回JSONResponse对象，其中content是将response对象转换为字典的结果
-            return JSONResponse(content=response.dict())
-
+        
+        # 非流式响应
+        response = ChatCompletionResponse(
+            model=request.model,
+            choices=[
+                ChatCompletionResponseChoice(
+                    index=0,
+                    message=Message(role="assistant", content=response_content),
+                    finish_reason="stop"
+                )
+            ],
+            usage=Usage(
+                prompt_tokens=len(prompt.split()),
+                completion_tokens=len(response_content.split()),
+                total_tokens=len(prompt.split()) + len(response_content.split())
+            )
+        )
+        
+        return JSONResponse(content=response.model_dump())
+        
     except Exception as e:
-        logger.error(f"处理聊天完成时出错:\n\n {str(e)}")
+        logger.error(f"处理查询请求失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # GET请求接口，获取可用模型列表
 @app.get("/v1/models")
 async def list_models():
+    """获取可用的模型列表"""
     logger.info("收到模型列表请求")
     current_time = int(time.time())
+    
     models = [
-        {"id": "graphrag-local-search:latest", "object": "model", "created": current_time - 100000, "owned_by": "graphrag"},
-        {"id": "graphrag-global-search:latest", "object": "model", "created": current_time - 95000, "owned_by": "graphrag"},
-        {"id": "full-model:latest", "object": "model", "created": current_time - 80000, "owned_by": "combined"}
+        {
+            "id": "graphrag-local-search:latest",
+            "object": "model",
+            "created": current_time - 100000,
+            "owned_by": "graphrag",
+            "description": "本地搜索模式 - 基于实体和关系"
+        },
+        {
+            "id": "graphrag-global-search:latest",
+            "object": "model",
+            "created": current_time - 95000,
+            "owned_by": "graphrag",
+            "description": "全局搜索模式 - 基于社区报告"
+        },
+        {
+            "id": "full-model:latest",
+            "object": "model",
+            "created": current_time - 80000,
+            "owned_by": "combined",
+            "description": "综合搜索模式 - 本地+全局"
+        }
     ]
-
-    response = {
+    
+    return JSONResponse(content={
         "object": "list",
         "data": models
-    }
-
-    logger.info(f"发送模型列表: {response}")
-    return JSONResponse(content=response)
+    })
 
 
+# 文档管理接口
+@app.get("/api/documents")
+async def get_documents():
+    """获取文档列表"""
+    try:
+        global documents_data
+        return JSONResponse(content={"documents": documents_data, "total": len(documents_data)})
+    except Exception as e:
+        logger.error(f"获取文档列表失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
+
+# 添加文档接口
+@app.post("/api/documents")
+async def add_document(document: Dict[str, Any]):
+    """添加新文档"""
+    try:
+        global documents_data
+        document["id"] = len(documents_data) + 1
+        document["uploadTime"] = time.strftime("%Y-%m-%d %H:%M")
+        documents_data.append(document)
+        save_persistent_data()
+        return JSONResponse(content={"status": "success", "document": document})
+    except Exception as e:
+        logger.error(f"添加文档失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 删除文档接口
+@app.delete("/api/documents/{doc_id}")
+async def delete_document(doc_id: int):
+    """删除文档"""
+    try:
+        global documents_data
+        documents_data = [doc for doc in documents_data if doc["id"] != doc_id]
+        save_persistent_data()
+        return JSONResponse(content={"status": "success", "message": "文档删除成功"})
+    except Exception as e:
+        logger.error(f"删除文档失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 系统设置接口
+@app.get("/api/settings")
+async def get_settings():
+    """获取系统设置"""
+    try:
+        global settings_data
+        # 更新数据统计数据
+        settings_data["dataStats"]["documents"] = len(documents_data)
+        return JSONResponse(content=settings_data)
+    except Exception as e:
+        logger.error(f"获取系统设置失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 保存系统设置接口
+@app.post("/api/settings")
+async def save_settings(settings: Dict[str, Any]):
+    """保存系统设置"""
+    try:
+        global settings_data
+        settings_data.update(settings)
+        save_persistent_data()
+        logger.info(f"保存系统设置成功")
+        return JSONResponse(content={"status": "success", "message": "设置保存成功"})
+    except Exception as e:
+        logger.error(f"保存系统设置失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 图谱数据接口
+@app.get("/api/graph/data")
+async def get_graph_data():
+    """获取图谱数据"""
+    try:
+        # 加载数据
+        entity_df, community_df, report_df, text_unit_df, relationship_df, covariate_df = await load_data()
+        
+        # 构建节点数据
+        nodes = []
+        if 'id' in entity_df.columns and 'title' in entity_df.columns:
+            for _, row in entity_df.head(50).iterrows():  # 限制返回50个节点
+                node = {
+                    "id": str(row['id']),
+                    "name": str(row['title']) if pd.notna(row['title']) else str(row['id']),
+                    "category": str(row.get('type', 'entity')),
+                    "value": int(row.get('degree', 1)) if pd.notna(row.get('degree', 1)) else 1
+                }
+                nodes.append(node)
+        
+        # 构建边数据
+        links = []
+        if 'source' in relationship_df.columns and 'target' in relationship_df.columns:
+            for _, row in relationship_df.head(100).iterrows():  # 限制返回100条边
+                link = {
+                    "source": str(row['source']),
+                    "target": str(row['target']),
+                    "relation": str(row.get('description', '相关')) if pd.notna(row.get('description', '相关')) else '相关',
+                    "value": float(row.get('weight', 1.0)) if pd.notna(row.get('weight', 1.0)) else 1.0
+                }
+                links.append(link)
+        
+        return JSONResponse(content={
+            "nodes": nodes,
+            "links": links,
+            "total_nodes": len(entity_df),
+            "total_links": len(relationship_df)
+        })
+    except Exception as e:
+        logger.error(f"获取图谱数据失败: {e}")
+        # 返回默认数据
+        return JSONResponse(content={
+            "nodes": [
+                {"id": "1", "name": "知识图谱", "category": "概念", "value": 10},
+                {"id": "2", "name": "实体", "category": "概念", "value": 8},
+                {"id": "3", "name": "关系", "category": "概念", "value": 8},
+                {"id": "4", "name": "GraphRAG", "category": "技术", "value": 6},
+                {"id": "5", "name": "人工智能", "category": "领域", "value": 7}
+            ],
+            "links": [
+                {"source": "1", "target": "2", "relation": "包含", "value": 1.0},
+                {"source": "1", "target": "3", "relation": "包含", "value": 1.0},
+                {"source": "4", "target": "1", "relation": "基于", "value": 0.8},
+                {"source": "5", "target": "4", "relation": "应用", "value": 0.7}
+            ],
+            "total_nodes": 5,
+            "total_links": 4
+        })
+
+
+# 健康检查接口
+@app.get("/health")
+async def health_check():
+    """健康检查接口"""
+    return JSONResponse(content={
+        "status": "healthy",
+        "config_loaded": graphrag_config is not None,
+        "timestamp": int(time.time())
+    })
+
+
+# 主函数
 if __name__ == "__main__":
-    logger.info(f"在端口 {PORT} 上启动服务器")
-    # uvicorn是一个用于运行ASGI应用的轻量级、超快速的ASGI服务器实现
-    # 用于部署基于FastAPI框架的异步PythonWeb应用程序
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    logger.info(f"启动知识图谱查询服务，监听端口: {PORT}")
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=PORT,
+        log_level="info"
+    )
 

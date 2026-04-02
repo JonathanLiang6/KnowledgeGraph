@@ -1,19 +1,108 @@
-# 知识图谱辅助学习系统
+# 知识图谱智能问答系统
 
-一个基于 GraphRAG 的知识图谱辅助学习系统，支持智能问答、图谱可视化、文档管理等功能。
+一个基于 GraphRAG 和智谱AI 的知识图谱智能问答系统，支持文档管理、知识图谱可视化和智能问答功能。
 
-## 技术栈
+## ✨ 功能特性
 
-- **前端**: Vue 3 + Element Plus + D3.js
-- **后端**: FastAPI + Python + GraphRAG
-- **数据库**: SQLite
-- **大语言模型**: 智谱AI
+### 1. 智能问答
+- 支持三种搜索模式：本地搜索、全局搜索、综合搜索
+- 基于知识图谱的精准问答
+- 支持 Markdown 格式回答
+- 对话历史记录和导出功能
 
-## 快速开始
+### 2. 图谱可视化
+- 交互式知识图谱展示
+- 支持多种布局方式（力导向、环形、树形、网格）
+- 实体详情查看和关系探索
+- 图谱缩放、拖拽和导出
 
-### 1. 环境准备
+### 3. 文档管理
+- 支持多种文件格式（PDF、Word、TXT、Markdown）
+- 文档上传和自动解析
+- 文档内容预览
+- 文档处理状态追踪
 
-#### 后端环境
+### 4. 系统设置
+- API 配置管理
+- 系统参数设置
+- 数据统计信息展示
+
+## 🛠️ 技术栈
+
+### 后端
+| 技术 | 说明 |
+|------|------|
+| FastAPI | 高性能 Web 框架 |
+| GraphRAG | 微软知识图谱框架 |
+| LanceDB | 向量数据库 |
+| 智谱AI | 大语言模型 API |
+| Pandas | 数据处理 |
+| jieba/NLTK/spaCy | NLP 处理 |
+
+### 前端
+| 技术 | 说明 |
+|------|------|
+| Vue 3 | 前端框架 |
+| Element Plus | UI 组件库 |
+| Pinia | 状态管理 |
+| D3.js | 图谱可视化 |
+| ECharts | 图表库 |
+| marked | Markdown 渲染 |
+
+## 📁 项目结构
+
+```
+KnowledgeGraph/
+├── backend/                    # 后端代码
+│   ├── cache/                  # LLM 调用缓存
+│   ├── data/                   # 持久化数据
+│   │   ├── documents.json      # 文档列表
+│   │   └── settings.json       # 系统设置
+│   ├── inputs/                 # 输入数据
+│   │   ├── artifacts/          # GraphRAG 生成的数据
+│   │   └── reports/            # 日志报告
+│   ├── prompts/                # LLM 提示词模板
+│   ├── utils/                  # 工具模块
+│   │   ├── config.py           # 配置管理
+│   │   ├── helpers.py          # 工具函数
+│   │   └── main.py             # FastAPI 主应用
+│   ├── .env.example            # 环境变量示例
+│   ├── requirements.txt        # Python 依赖
+│   ├── settings.yaml           # GraphRAG 配置
+│   └── start_server.py         # 启动脚本
+├── frontend/                   # 前端代码
+│   ├── src/
+│   │   ├── router/             # 路由配置
+│   │   ├── styles/             # SCSS 样式
+│   │   ├── views/              # 页面组件
+│   │   │   ├── Home.vue        # 首页
+│   │   │   ├── Chat.vue        # 智能问答
+│   │   │   ├── Graph.vue       # 图谱可视化
+│   │   │   ├── Documents.vue   # 文档管理
+│   │   │   └── Settings.vue    # 系统设置
+│   │   ├── App.vue             # 根组件
+│   │   └── main.js             # 入口文件
+│   ├── index.html
+│   ├── package.json
+│   └── vite.config.js
+└── README.md
+```
+
+## 🚀 快速开始
+
+### 环境要求
+- Python 3.8+
+- Node.js 16+
+- 智谱AI API 密钥
+
+### 1. 克隆项目
+
+```bash
+git clone <repository-url>
+cd KnowledgeGraph
+```
+
+### 2. 后端配置
 
 ```bash
 # 进入后端目录
@@ -23,16 +112,20 @@ cd backend
 python -m venv venv
 
 # 激活虚拟环境
-# Windows
+# Windows:
 venv\Scripts\activate
-# Linux/Mac
+# Linux/Mac:
 # source venv/bin/activate
 
 # 安装依赖
 pip install -r requirements.txt
+
+# 配置环境变量
+copy .env.example .env
+# 编辑 .env 文件，填写你的智谱AI API密钥
 ```
 
-#### 前端环境
+### 3. 前端配置
 
 ```bash
 # 进入前端目录
@@ -40,80 +133,85 @@ cd frontend
 
 # 安装依赖
 npm install
-```
-
-### 2. 配置API密钥
-
-1. 在 `backend` 目录下创建 `.env` 文件
-2. 填写智谱AI API密钥
-
-```env
-# 智谱AI API配置
-GRAPHRAG_API_BASE=https://open.bigmodel.cn/api/paas/v4
-GRAPHRAG_CHAT_API_KEY=your-api-key-here  # 替换为实际的API密钥
-GRAPHRAG_EMBEDDING_API_KEY=your-api-key-here  # 替换为实际的API密钥
-GRAPHRAG_CHAT_MODEL=glm-4-flash
-GRAPHRAG_EMBEDDING_MODEL=embedding-2
-```
-
-### 3. 启动服务
-
-#### 后端服务
-
-```bash
-# 进入后端目录
-cd backend
-
-# 启动服务
-python start_server.py
-```
-
-#### 前端服务
-
-```bash
-# 进入前端目录
-cd frontend
 
 # 启动开发服务器
 npm run dev
 ```
 
-### 4. 访问系统
+### 4. 启动服务
 
-- 前端：http://localhost:3000
-- 后端API：http://localhost:8012
+```bash
+# 在后端目录启动服务
+cd backend
+python start_server.py
+```
 
-## 系统功能
+### 5. 访问系统
 
-### 1. 智能问答
-- 基于知识图谱的智能问答
-- 支持本地搜索、全局搜索和综合搜索
-- 支持流式响应
+- 前端界面：http://localhost:3000
+- 后端 API：http://localhost:8012
+- API 文档：http://localhost:8012/docs
 
-### 2. 图谱可视化
-- 交互式图谱展示
-- 支持多种布局方式（力导向、环形、树形、网格）
-- 实体详情查看
-- 图谱缩放和拖拽
+## ⚙️ 配置说明
 
-### 3. 文档管理
-- 支持多种文件格式（txt、md、docx、pdf）
-- 文档上传和管理
-- 文档内容预览
+### 环境变量 (.env)
 
-### 4. 系统设置
-- API配置管理
-- 系统参数设置
-- 数据统计信息
+```env
+# 智谱AI API 配置
+GRAPHRAG_API_BASE=https://open.bigmodel.cn/api/paas/v4
+GRAPHRAG_CHAT_API_KEY=your-api-key-here
+GRAPHRAG_EMBEDDING_API_KEY=your-api-key-here
+GRAPHRAG_CHAT_MODEL=glm-4-flash
+GRAPHRAG_EMBEDDING_MODEL=embedding-2
 
-## API接口
+# 服务器配置
+SERVER_HOST=0.0.0.0
+SERVER_PORT=8012
+LOG_LEVEL=INFO
+```
 
-### 智能问答接口
+### GraphRAG 配置 (settings.yaml)
 
-**POST /v1/chat/completions**
+主要配置项：
+- **LLM 配置**：模型类型、最大 token 数、重试次数
+- **嵌入配置**：嵌入模型、批处理大小
+- **文本分块**：块大小、重叠大小
+- **实体类型**：支持的实体类型列表
+- **搜索配置**：本地搜索和全局搜索参数
 
-请求体：
-```json
+## 📖 使用指南
+
+### 智能问答
+
+1. 进入「智能问答」页面
+2. 在输入框中输入问题
+3. 选择搜索模式（本地/全局/综合）
+4. 点击发送或按 Enter 键
+5. 查看 AI 回答，支持复制和反馈
+
+### 图谱可视化
+
+1. 进入「图谱可视化」页面
+2. 使用控制面板筛选实体类型和关系类型
+3. 切换不同的布局方式
+4. 点击节点查看详细信息
+5. 拖拽节点调整位置，滚轮缩放视图
+
+### 文档管理
+
+1. 进入「文档管理」页面
+2. 点击上传按钮选择文件
+3. 系统自动解析文档并提取知识
+4. 查看文档处理状态和统计信息
+
+## 🔌 API 接口
+
+### 智能问答
+
+```http
+POST /v1/chat/completions
+Content-Type: application/json
+
 {
   "model": "graphrag-local-search:latest",
   "messages": [
@@ -122,7 +220,7 @@ npm run dev
       "content": "什么是知识图谱？"
     }
   ],
-  "stream": true
+  "stream": false
 }
 ```
 
@@ -130,121 +228,77 @@ npm run dev
 - `graphrag-local-search:latest` - 本地搜索（基于实体和关系）
 - `graphrag-global-search:latest` - 全局搜索（基于社区报告）
 - `full-model:latest` - 综合搜索（本地+全局）
+- `gpt-4o:latest` - 直接调用大模型
 
-### 模型列表接口
+### 获取模型列表
 
-**GET /v1/models**
-
-返回可用的模型列表。
-
-### 健康检查接口
-
-**GET /health**
-
-返回服务健康状态。
-
-## 项目结构
-
-```
-KnowledgeGraph/
-├── backend/           # 后端代码
-│   ├── utils/         # 工具函数
-│   ├── prompts/       # 提示词文件
-│   ├── inputs/        # 输入数据
-│   ├── requirements.txt  # 依赖文件
-│   ├── settings.yaml  # GraphRAG配置
-│   ├── .env           # 环境变量配置
-│   └── start_server.py  # 启动脚本
-├── frontend/          # 前端代码
-│   ├── src/           # 源代码
-│   ├── public/        # 静态资源
-│   ├── package.json   # 依赖配置
-│   └── vite.config.js # Vite配置
-└── README.md          # 项目说明
+```http
+GET /v1/models
 ```
 
-## 配置说明
+### 获取图谱数据
 
-### 环境变量配置
+```http
+GET /api/graph/data
+```
 
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| GRAPHRAG_API_BASE | API基础地址 | https://open.bigmodel.cn/api/paas/v4 |
-| GRAPHRAG_CHAT_API_KEY | 聊天API密钥 | - |
-| GRAPHRAG_EMBEDDING_API_KEY | 嵌入API密钥 | - |
-| GRAPHRAG_CHAT_MODEL | 聊天模型 | glm-4-flash |
-| GRAPHRAG_EMBEDDING_MODEL | 嵌入模型 | embedding-2 |
-| SERVER_HOST | 服务器主机 | 0.0.0.0 |
-| SERVER_PORT | 服务器端口 | 8012 |
-| LOG_LEVEL | 日志级别 | INFO |
+### 文档管理
 
-### GraphRAG配置
+```http
+# 获取文档列表
+GET /api/documents
 
-配置文件：`backend/settings.yaml`
+# 上传文档
+POST /api/documents/upload
+Content-Type: multipart/form-data
 
-主要配置项：
-- 语言模型配置
-- 嵌入模型配置
-- 文本分块配置
-- 输入配置（支持的文件格式）
-- 缓存配置
-- 存储配置
+# 处理文档
+POST /api/documents/{doc_id}/process
 
-## 使用指南
+# 删除文档
+DELETE /api/documents/{doc_id}
+```
 
-### 1. 智能问答
+### 系统设置
 
-1. 打开前端页面：http://localhost:3000
-2. 点击「智能问答」菜单
-3. 在输入框中输入问题
-4. 选择搜索模式（本地、全局或综合）
-5. 点击「发送」按钮或按 Enter 键
-6. 查看回答结果
+```http
+# 获取设置
+GET /api/settings
 
-### 2. 图谱可视化
+# 保存设置
+POST /api/settings
+Content-Type: application/json
+```
 
-1. 打开前端页面：http://localhost:3000
-2. 点击「图谱可视化」菜单
-3. 查看知识图谱
-4. 可以：
-   - 点击节点查看详情
-   - 拖拽节点调整位置
-   - 使用控制面板调整布局和筛选
-   - 缩放视图查看不同层级
+## 📂 数据存储
 
-### 3. 文档管理
+| 类型 | 路径 | 说明 |
+|------|------|------|
+| 上传文档 | `backend/inputs/` | 用户上传的原始文件 |
+| 图谱数据 | `backend/inputs/artifacts/` | GraphRAG 生成的 Parquet 文件 |
+| 缓存数据 | `backend/cache/` | LLM 调用缓存 |
+| 持久化数据 | `backend/data/` | documents.json, settings.json |
+| 报告日志 | `backend/inputs/reports/` | 系统运行日志 |
 
-1. 打开前端页面：http://localhost:3000
-2. 点击「文档管理」菜单
-3. 上传文档（支持txt、md、docx、pdf）
-4. 查看文档列表和详情
+## 🐛 常见问题
 
-### 4. 系统设置
+### 1. API 密钥未设置
 
-1. 打开前端页面：http://localhost:3000
-2. 点击「系统设置」菜单
-3. 配置API参数
-4. 查看系统统计信息
+**问题**：启动服务时提示「API 密钥未设置」
 
-## 常见问题
-
-### 1. API密钥设置
-
-**问题**：启动服务时提示「API密钥未设置」
-
-**解决方法**：在 `backend/.env` 文件中设置正确的智谱AI API密钥。
+**解决**：在 `backend/.env` 文件中设置正确的智谱AI API 密钥
 
 ### 2. 数据加载失败
 
 **问题**：启动服务时提示「加载数据失败」
 
-**解决方法**：确保 `backend/inputs/artifacts` 目录中存在必要的数据文件。
+**解决**：确保 `backend/inputs/artifacts` 目录中存在必要的 Parquet 数据文件
 
 ### 3. 依赖安装失败
 
 **问题**：安装依赖时失败
 
-**解决方法**：确保使用的是 Python 3.8+，并尝试更新 pip：
+**解决**：确保使用 Python 3.8+，并尝试更新 pip：
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt
@@ -254,46 +308,28 @@ pip install -r requirements.txt
 
 **问题**：启动服务时提示端口被占用
 
-**解决方法**：修改 `backend/.env` 文件中的 `SERVER_PORT` 配置，使用其他端口。
+**解决**：修改 `backend/.env` 文件中的 `SERVER_PORT` 配置，使用其他端口
 
-## 开发与扩展
+## 📝 开发计划
 
-### 后端扩展
+- [ ] 支持更多文档格式
+- [ ] 添加用户认证功能
+- [ ] 优化图谱布局算法
+- [ ] 支持多语言问答
+- [ ] 添加图谱编辑功能
 
-1. **添加新的API接口**：在 `backend/utils/main.py` 中添加新的路由
-2. **修改搜索逻辑**：修改 `perform_local_search`、`perform_global_search` 函数
-3. **添加新的数据源**：修改 `load_data` 函数
-
-### 前端扩展
-
-1. **添加新的组件**：在 `frontend/src/components` 中创建新组件
-2. **修改页面布局**：修改相应的 Vue 页面文件
-3. **添加新的功能**：在 `frontend/src/views` 中创建新页面
-
-## 部署建议
-
-### 开发环境
-
-- 前端：`npm run dev`
-- 后端：`python start_server.py`
-
-### 生产环境
-
-1. **前端构建**：
-   ```bash
-   cd frontend
-   npm run build
-   ```
-
-2. **后端部署**：
-   - 使用 Gunicorn 或 uWSGI 作为 WSGI 服务器
-   - 配置 Nginx 作为反向代理
-   - 设置环境变量和安全配置
-
-## 许可证
+## 📄 许可证
 
 MIT License
 
-## 联系方式
+## 🤝 贡献
+
+欢迎提交 Issue 和 Pull Request！
+
+## 📧 联系方式
 
 如有问题或建议，请联系项目维护者。
+
+---
+
+**注意**：本项目仅供学习和研究使用，请遵守相关 API 服务条款。

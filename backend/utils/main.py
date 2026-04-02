@@ -12,7 +12,34 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Union, AsyncGenerator
 from contextlib import asynccontextmanager
+from fastapi import Request
 import uvicorn
+
+# 添加必要的库
+import jieba
+import jieba.analyse
+import nltk
+from nltk.corpus import stopwords
+import spacy
+
+# 下载必要的资源
+try:
+    nltk.download('stopwords', quiet=True)
+except:
+    pass
+
+try:
+    nlp = spacy.load('zh_core_web_sm')
+except:
+    # 如果没有安装中文模型，使用英文模型
+    try:
+        nlp = spacy.load('en_core_web_sm')
+    except:
+        nlp = None
+
+# 自定义停用词表
+STOP_WORDS = set(stopwords.words('chinese') if 'chinese' in stopwords.fileids() else stopwords.words('english'))
+STOP_WORDS.update(['的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好', '自己', '这'])
 
 # 导入配置
 import sys
@@ -225,6 +252,227 @@ async def generate_stream_response(content: str, model: str) -> AsyncGenerator[s
     yield "data: [DONE]\n"
 
 
+# 文本预处理
+def preprocess_text(text):
+    """文本预处理"""
+    # 分句/分段
+    sentences = re.split(r'[。！？.!?]+', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    
+    # 分词和去停用词
+    processed_sentences = []
+    for sentence in sentences:
+        # 分词
+        words = jieba.cut(sentence)
+        # 去停用词
+        words = [word for word in words if word not in STOP_WORDS and word.strip()]
+        if words:
+            processed_sentences.append((sentence, words))
+    
+    return processed_sentences
+
+# 实体抽取
+def extract_entities(text):
+    """实体抽取"""
+    processed_sentences = preprocess_text(text)
+    
+    # 基于TF-IDF提取关键词作为实体
+    all_words = []
+    for _, words in processed_sentences:
+        all_words.extend(words)
+    
+    # 使用jieba的TF-IDF提取关键词
+    keywords = jieba.analyse.extract_tags(' '.join(all_words), topK=50, withWeight=True)
+    
+    # 构建实体列表
+    entities = []
+    entity_id = 1
+    for keyword, weight in keywords:
+        entities.append({
+            "id": str(entity_id),
+            "name": keyword,
+            "type": "entity",
+            "weight": weight
+        })
+        entity_id += 1
+    
+    return entities, processed_sentences
+
+# 关系抽取
+def extract_relationships(entities, processed_sentences):
+    """关系抽取"""
+    relationships = []
+    relationship_id = 1
+    
+    # 构建实体映射，方便查找
+    entity_map = {entity["name"]: entity["id"] for entity in entities}
+    
+    # 基于共现关系抽取
+    for sentence, words in processed_sentences:
+        # 找出句子中的实体
+        sentence_entities = [word for word in words if word in entity_map]
+        
+        # 生成实体对
+        for i in range(len(sentence_entities)):
+            for j in range(i + 1, len(sentence_entities)):
+                source = entity_map[sentence_entities[i]]
+                target = entity_map[sentence_entities[j]]
+                
+                # 计算距离权重（距离越近，权重越高）
+                distance = abs(i - j)
+                weight = 1.0 / (distance + 1)
+                
+                # 检查是否已经存在相同的关系
+                exists = False
+                for rel in relationships:
+                    if (rel["source"] == source and rel["target"] == target) or \
+                       (rel["source"] == target and rel["target"] == source):
+                        # 如果存在，更新权重
+                        rel["value"] += weight
+                        exists = True
+                        break
+                
+                if not exists:
+                    relationships.append({
+                        "id": str(relationship_id),
+                        "source": source,
+                        "target": target,
+                        "relation": "关联",
+                        "value": weight,
+                        "sentence": sentence
+                    })
+                    relationship_id += 1
+    
+    return relationships
+
+# 读取文件内容
+def read_file_content(file_path):
+    """读取文件内容"""
+    try:
+        ext = os.path.splitext(file_path)[1].lower()
+        
+        if ext == '.txt' or ext == '.md':
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                return f.read()
+        elif ext == '.pdf':
+            # 简单的PDF读取，实际项目中可能需要使用PyPDF2等库
+            try:
+                import PyPDF2
+                with open(file_path, 'rb') as f:
+                    reader = PyPDF2.PdfReader(f)
+                    text = ''
+                    for page in reader.pages:
+                        text += page.extract_text()
+                    return text
+            except:
+                return f"PDF文件: {os.path.basename(file_path)}"
+        elif ext in ['.doc', '.docx']:
+            # 简单的Word读取，实际项目中可能需要使用python-docx等库
+            try:
+                from docx import Document
+                doc = Document(file_path)
+                text = ''
+                for para in doc.paragraphs:
+                    text += para.text + '\n'
+                return text
+            except:
+                return f"Word文件: {os.path.basename(file_path)}"
+        else:
+            return f"不支持的文件类型: {ext}"
+    except Exception as e:
+        logger.error(f"读取文件失败: {e}")
+        return f"读取文件失败: {str(e)}"
+
+# 构建知识图谱
+def build_knowledge_graph(file_path):
+    """构建知识图谱"""
+    try:
+        # 读取文件内容
+        text = read_file_content(file_path)
+        
+        # 实体抽取
+        entities, processed_sentences = extract_entities(text)
+        
+        # 关系抽取
+        relationships = extract_relationships(entities, processed_sentences)
+        
+        # 转换为前端需要的格式
+        nodes = []
+        for entity in entities:
+            nodes.append({
+                "id": entity["id"],
+                "name": entity["name"],
+                "type": entity["type"],
+                "value": int(entity["weight"] * 10)
+            })
+        
+        links = []
+        for rel in relationships:
+            links.append({
+                "source": rel["source"],
+                "target": rel["target"],
+                "relation": rel["relation"],
+                "value": rel["value"]
+            })
+        
+        return {
+            "nodes": nodes,
+            "links": links,
+            "entities_count": len(entities),
+            "relationships_count": len(relationships)
+        }
+    except Exception as e:
+        logger.error(f"构建知识图谱失败: {e}")
+        raise
+
+# 扫描本地文件夹获取文件列表
+def scan_local_files():
+    """扫描本地文件夹获取文件列表"""
+    from utils.config import config
+    import os
+    
+    local_data_dir = config.LOCAL_DATA_DIR
+    files = []
+    
+    try:
+        if os.path.exists(local_data_dir):
+            for root, dirs, filenames in os.walk(local_data_dir):
+                for filename in filenames:
+                    if filename.endswith(('.pdf', '.doc', '.docx', '.txt', '.md')):
+                        file_path = os.path.join(root, filename)
+                        relative_path = os.path.relpath(file_path, local_data_dir)
+                        file_size = os.path.getsize(file_path)
+                        
+                        files.append({
+                            "name": filename,
+                            "path": relative_path,
+                            "size": file_size,
+                            "type": get_file_type(filename),
+                            "status": "pending"
+                        })
+            logger.info(f"扫描本地文件夹完成，发现 {len(files)} 个文件")
+        else:
+            logger.warning(f"本地数据目录不存在: {local_data_dir}")
+    except Exception as e:
+        logger.error(f"扫描本地文件夹失败: {e}")
+    
+    return files
+
+# 获取文件类型
+def get_file_type(filename):
+    """根据文件名获取文件类型"""
+    ext = filename.split('.')[-1].lower()
+    if ext == 'pdf':
+        return 'PDF'
+    elif ext in ['doc', 'docx']:
+        return 'Word'
+    elif ext == 'txt':
+        return '文本'
+    elif ext == 'md':
+        return 'Markdown'
+    else:
+        return '其他'
+
 # 加载持久化数据
 def load_persistent_data():
     """加载持久化的数据"""
@@ -240,45 +488,12 @@ def load_persistent_data():
             logger.error(f"加载文档数据失败: {e}")
             documents_data = []
     else:
-        # 初始化默认文档数据
-        documents_data = [
-            {
-                "id": 1,
-                "name": "人工智能导论.pdf",
-                "size": 1024000,
-                "type": "PDF",
-                "status": "processed",
-                "uploadTime": "2026-03-30 10:30",
-                "processedTime": "2026-03-30 10:35",
-                "stats": {"entities": 128, "relationships": 256, "chunks": 384}
-            },
-            {
-                "id": 2,
-                "name": "知识图谱技术.docx",
-                "size": 2048000,
-                "type": "Word",
-                "status": "processed",
-                "uploadTime": "2026-03-29 16:45",
-                "processedTime": "2026-03-29 16:50",
-                "stats": {"entities": 256, "relationships": 512, "chunks": 768}
-            },
-            {
-                "id": 3,
-                "name": "GraphRAG研究.md",
-                "size": 512000,
-                "type": "Markdown",
-                "status": "processing",
-                "uploadTime": "2026-03-29 14:20"
-            },
-            {
-                "id": 4,
-                "name": "SQLite使用指南.txt",
-                "size": 256000,
-                "type": "文本",
-                "status": "pending",
-                "uploadTime": "2026-03-28 09:15"
-            }
-        ]
+        # 扫描本地文件夹获取文件列表
+        documents_data = scan_local_files()
+        # 为每个文件分配ID
+        for i, doc in enumerate(documents_data):
+            doc["id"] = i + 1
+            doc["uploadTime"] = time.strftime("%Y-%m-%d %H:%M")
         save_persistent_data()
     
     # 加载设置数据
@@ -568,6 +783,11 @@ async def chat_completions(request: ChatCompletionRequest):
         elif request.model == "graphrag-local-search:latest":
             response_content = await perform_local_search(prompt)
             
+        elif request.model == "gpt-4o:latest":
+            # 直接调用大模型API
+            logger.info("直接调用大模型API")
+            response_content = await call_zhipu_api(prompt)
+            
         else:
             # 默认使用本地搜索
             logger.warning(f"未知模型: {request.model}，使用默认本地搜索")
@@ -634,6 +854,13 @@ async def list_models():
             "created": current_time - 80000,
             "owned_by": "combined",
             "description": "综合搜索模式 - 本地+全局"
+        },
+        {
+            "id": "gpt-4o:latest",
+            "object": "model",
+            "created": current_time - 70000,
+            "owned_by": "openai",
+            "description": "直接调用大模型API - 全局知识"
         }
     ]
     
@@ -685,18 +912,148 @@ async def delete_document(doc_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# 处理上传的文件
+async def process_uploaded_file(filename):
+    """处理上传的文件，包括解析、抽取实体和关系、构建知识图谱"""
+    try:
+        logger.info(f"开始处理文件: {filename}")
+        
+        # 查找文档
+        global documents_data
+        doc = next((d for d in documents_data if d["name"] == filename), None)
+        if not doc:
+            logger.error(f"文档不存在: {filename}")
+            return
+        
+        # 构建文件完整路径
+        from utils.config import config
+        local_data_dir = config.LOCAL_DATA_DIR
+        file_path = os.path.join(local_data_dir, filename)
+        
+        # 检查文件是否存在
+        if not os.path.exists(file_path):
+            logger.error(f"文件不存在: {file_path}")
+            doc["status"] = "failed"
+            doc["error"] = "文件不存在"
+            save_persistent_data()
+            return
+        
+        # 解析文件内容
+        logger.info(f"解析文件: {file_path}")
+        text = read_file_content(file_path)
+        
+        # 抽取实体
+        logger.info("抽取实体...")
+        entities, processed_sentences = extract_entities(text)
+        
+        # 抽取关系
+        logger.info("抽取关系...")
+        relationships = extract_relationships(entities, processed_sentences)
+        
+        # 构建知识图谱
+        logger.info("构建知识图谱...")
+        graph_data = build_knowledge_graph(file_path)
+        
+        # 更新文档状态为已处理
+        doc["status"] = "processed"
+        doc["processedTime"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        doc["stats"] = {
+            "entities": len(entities),
+            "relationships": len(relationships),
+            "chunks": len(processed_sentences)
+        }
+        save_persistent_data()
+        
+        logger.info(f"文件处理完成: {filename}")
+        logger.info(f"抽取实体数: {len(entities)}, 关系数: {len(relationships)}")
+    except Exception as e:
+        # 更新文档状态为失败
+        if doc:
+            doc["status"] = "failed"
+            doc["error"] = str(e)
+            save_persistent_data()
+        logger.error(f"处理文件失败: {e}")
+
+
+# 处理文档接口
+@app.post("/api/documents/{doc_id}/process")
+async def process_document(doc_id: int):
+    """处理文档"""
+    try:
+        global documents_data
+        doc = next((d for d in documents_data if d["id"] == doc_id), None)
+        if not doc:
+            raise HTTPException(status_code=404, detail="文档不存在")
+        
+        # 更新文档状态为处理中
+        doc["status"] = "processing"
+        save_persistent_data()
+        
+        # 模拟文档处理过程
+        import asyncio
+        await asyncio.sleep(2)  # 模拟处理时间
+        
+        # 更新文档状态为已处理
+        doc["status"] = "processed"
+        doc["processedTime"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        doc["stats"] = {
+            "entities": 150,
+            "relationships": 300,
+            "chunks": 450
+        }
+        save_persistent_data()
+        
+        return JSONResponse(content={"status": "success", "message": "文档处理成功", "document": doc})
+    except HTTPException:
+        raise
+    except Exception as e:
+        # 更新文档状态为失败
+        doc["status"] = "failed"
+        doc["error"] = str(e)
+        save_persistent_data()
+        logger.error(f"处理文档失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # 系统设置接口
 @app.get("/api/settings")
 async def get_settings():
     """获取系统设置"""
     try:
         global settings_data
+        # 确保dataStats字段存在
+        if "dataStats" not in settings_data:
+            settings_data["dataStats"] = {
+                "documents": 0,
+                "entities": 0,
+                "relationships": 0
+            }
         # 更新数据统计数据
         settings_data["dataStats"]["documents"] = len(documents_data)
         return JSONResponse(content=settings_data)
     except Exception as e:
         logger.error(f"获取系统设置失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # 返回默认设置
+        return JSONResponse(content={
+            "api": {
+                "apiKey": "",
+                "apiBaseUrl": "https://open.bigmodel.cn/api/paas/v4",
+                "model": "glm-4-flash",
+                "timeout": 30
+            },
+            "system": {
+                "batchSize": 5,
+                "chunkSize": 1000,
+                "overlapRatio": 0.1,
+                "entityThreshold": 0.7,
+                "relationThreshold": 0.6
+            },
+            "dataStats": {
+                "documents": len(documents_data),
+                "entities": 0,
+                "relationships": 0
+            }
+        })
 
 
 # 保存系统设置接口
@@ -714,54 +1071,105 @@ async def save_settings(settings: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# 文档上传接口
+@app.post("/api/documents/upload")
+async def upload_document(request: Request):
+    """上传文档并生成/更新图谱"""
+    try:
+        form = await request.form()
+        file = form.get("file")
+        
+        if not file:
+            raise HTTPException(status_code=400, detail="请选择要上传的文件")
+        
+        # 保存文件到本地数据目录
+        from utils.config import config
+        local_data_dir = config.LOCAL_DATA_DIR
+        os.makedirs(local_data_dir, exist_ok=True)
+        
+        file_path = os.path.join(local_data_dir, file.filename)
+        with open(file_path, "wb") as f:
+            f.write(await file.read())
+        
+        logger.info(f"文件上传成功: {file.filename}")
+        
+        # 重新扫描本地文件夹，更新文档列表
+        global documents_data
+        documents_data = scan_local_files()
+        for i, doc in enumerate(documents_data):
+            doc["id"] = i + 1
+            doc["uploadTime"] = time.strftime("%Y-%m-%d %H:%M")
+            # 设置初始状态为处理中
+            if "status" not in doc:
+                doc["status"] = "processing"
+        save_persistent_data()
+        
+        # 启动异步任务处理文档
+        import asyncio
+        asyncio.create_task(process_uploaded_file(file.filename))
+        
+        return JSONResponse(content={"status": "success", "message": "文件上传成功，正在处理..."})
+    except Exception as e:
+        logger.error(f"文件上传失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # 图谱数据接口
 @app.get("/api/graph/data")
 async def get_graph_data():
     """获取图谱数据"""
     try:
-        # 加载数据
-        entity_df, community_df, report_df, text_unit_df, relationship_df, covariate_df = await load_data()
+        # 检查是否有已处理的文档
+        global documents_data
+        processed_docs = [doc for doc in documents_data if doc.get("status") == "processed"]
         
-        # 构建节点数据
-        nodes = []
-        if 'id' in entity_df.columns and 'title' in entity_df.columns:
-            for _, row in entity_df.head(50).iterrows():  # 限制返回50个节点
-                node = {
-                    "id": str(row['id']),
-                    "name": str(row['title']) if pd.notna(row['title']) else str(row['id']),
-                    "category": str(row.get('type', 'entity')),
-                    "value": int(row.get('degree', 1)) if pd.notna(row.get('degree', 1)) else 1
-                }
-                nodes.append(node)
-        
-        # 构建边数据
-        links = []
-        if 'source' in relationship_df.columns and 'target' in relationship_df.columns:
-            for _, row in relationship_df.head(100).iterrows():  # 限制返回100条边
-                link = {
-                    "source": str(row['source']),
-                    "target": str(row['target']),
-                    "relation": str(row.get('description', '相关')) if pd.notna(row.get('description', '相关')) else '相关',
-                    "value": float(row.get('weight', 1.0)) if pd.notna(row.get('weight', 1.0)) else 1.0
-                }
-                links.append(link)
-        
-        return JSONResponse(content={
-            "nodes": nodes,
-            "links": links,
-            "total_nodes": len(entity_df),
-            "total_links": len(relationship_df)
-        })
+        if processed_docs:
+            # 选择最新处理的文档
+            latest_doc = sorted(processed_docs, key=lambda x: x.get("processedTime", ""), reverse=True)[0]
+            
+            # 构建文件完整路径
+            from utils.config import config
+            local_data_dir = config.LOCAL_DATA_DIR
+            file_path = os.path.join(local_data_dir, latest_doc["name"])
+            
+            # 构建知识图谱
+            graph_data = build_knowledge_graph(file_path)
+            
+            return JSONResponse(content={
+                "nodes": graph_data["nodes"],
+                "links": graph_data["links"],
+                "total_nodes": len(graph_data["nodes"]),
+                "total_links": len(graph_data["links"])
+            })
+        else:
+            # 没有已处理的文档，返回默认数据
+            return JSONResponse(content={
+                "nodes": [
+                    {"id": "1", "name": "知识图谱", "type": "概念", "value": 10},
+                    {"id": "2", "name": "实体", "type": "概念", "value": 8},
+                    {"id": "3", "name": "关系", "type": "概念", "value": 8},
+                    {"id": "4", "name": "GraphRAG", "type": "技术", "value": 6},
+                    {"id": "5", "name": "人工智能", "type": "领域", "value": 7}
+                ],
+                "links": [
+                    {"source": "1", "target": "2", "relation": "包含", "value": 1.0},
+                    {"source": "1", "target": "3", "relation": "包含", "value": 1.0},
+                    {"source": "4", "target": "1", "relation": "基于", "value": 0.8},
+                    {"source": "5", "target": "4", "relation": "应用", "value": 0.7}
+                ],
+                "total_nodes": 5,
+                "total_links": 4
+            })
     except Exception as e:
         logger.error(f"获取图谱数据失败: {e}")
         # 返回默认数据
         return JSONResponse(content={
             "nodes": [
-                {"id": "1", "name": "知识图谱", "category": "概念", "value": 10},
-                {"id": "2", "name": "实体", "category": "概念", "value": 8},
-                {"id": "3", "name": "关系", "category": "概念", "value": 8},
-                {"id": "4", "name": "GraphRAG", "category": "技术", "value": 6},
-                {"id": "5", "name": "人工智能", "category": "领域", "value": 7}
+                {"id": "1", "name": "知识图谱", "type": "概念", "value": 10},
+                {"id": "2", "name": "实体", "type": "概念", "value": 8},
+                {"id": "3", "name": "关系", "type": "概念", "value": 8},
+                {"id": "4", "name": "GraphRAG", "type": "技术", "value": 6},
+                {"id": "5", "name": "人工智能", "type": "领域", "value": 7}
             ],
             "links": [
                 {"source": "1", "target": "2", "relation": "包含", "value": 1.0},

@@ -167,20 +167,7 @@
           </div>
         </div>
 
-        <!-- 推荐问题 -->
-        <div class="card">
-          <h3>推荐问题</h3>
-          <div class="recommended-questions">
-            <div 
-              v-for="(question, index) in recommendedQuestions" 
-              :key="index" 
-              class="recommended-question"
-              @click="selectRecommendedQuestion(question)"
-            >
-              {{ question }}
-            </div>
-          </div>
-        </div>
+
 
         <!-- 对话统计 -->
         <div class="card">
@@ -212,14 +199,47 @@ import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
 
 // 聊天消息
-const messages = ref([
-  {
-    id: 1,
-    role: 'assistant',
-    content: '<p>你好！我是知识图谱助手，有什么我可以帮助你的吗？</p>',
-    time: '2026-03-30 10:00'
+const messages = ref([])
+
+// 从本地存储加载对话记录
+const loadMessages = () => {
+  const storedMessages = localStorage.getItem('chatMessages')
+  if (storedMessages) {
+    try {
+      messages.value = JSON.parse(storedMessages)
+    } catch (error) {
+      console.error('加载对话记录失败:', error)
+      // 加载失败时使用默认消息
+      messages.value = [
+        {
+          id: 1,
+          role: 'assistant',
+          content: '<p>你好！我是知识图谱助手，有什么我可以帮助你的吗？</p>',
+          time: '2026-03-30 10:00'
+        }
+      ]
+    }
+  } else {
+    // 首次加载时使用默认消息
+    messages.value = [
+      {
+        id: 1,
+        role: 'assistant',
+        content: '<p>你好！我是知识图谱助手，有什么我可以帮助你的吗？</p>',
+        time: '2026-03-30 10:00'
+      }
+    ]
   }
-])
+}
+
+// 保存对话记录到本地存储
+const saveMessages = () => {
+  try {
+    localStorage.setItem('chatMessages', JSON.stringify(messages.value))
+  } catch (error) {
+    console.error('保存对话记录失败:', error)
+  }
+}
 
 // 输入消息
 const inputMessage = ref('')
@@ -231,25 +251,33 @@ const loading = ref(false)
 const searchMode = ref('local')
 
 // 历史记录
-const historyList = ref([
-  {
-    question: '什么是知识图谱？',
-    time: '2026-03-29 14:20'
-  },
-  {
-    question: '知识图谱有哪些应用？',
-    time: '2026-03-29 10:15'
-  }
-])
+const historyList = ref([])
 
-// 推荐问题
-const recommendedQuestions = ref([
-  '知识图谱的基本概念',
-  '知识图谱的构建方法',
-  '知识图谱在教育中的应用',
-  '如何优化知识图谱',
-  '知识图谱与人工智能的关系'
-])
+// 从本地存储加载历史记录
+const loadHistoryList = () => {
+  const storedHistory = localStorage.getItem('chatHistory')
+  if (storedHistory) {
+    try {
+      historyList.value = JSON.parse(storedHistory)
+    } catch (error) {
+      console.error('加载历史记录失败:', error)
+      historyList.value = []
+    }
+  } else {
+    historyList.value = []
+  }
+}
+
+// 保存历史记录到本地存储
+const saveHistoryList = () => {
+  try {
+    localStorage.setItem('chatHistory', JSON.stringify(historyList.value))
+  } catch (error) {
+    console.error('保存历史记录失败:', error)
+  }
+}
+
+
 
 // 引用
 const chatMessages = ref(null)
@@ -269,6 +297,9 @@ const sendMessage = async () => {
     time: new Date().toLocaleString('zh-CN')
   })
   
+  // 保存对话记录
+  saveMessages()
+  
   inputMessage.value = ''
   loading.value = true
 
@@ -278,10 +309,20 @@ const sendMessage = async () => {
 
   try {
     // 调用后端API
-    const model = searchMode.value === 'local' ? 'graphrag-local-search:latest' : 
-                 searchMode.value === 'global' ? 'graphrag-global-search:latest' : 'full-model:latest'
+    let model, endpoint;
+    if (searchMode.value === 'local') {
+      model = 'graphrag-local-search:latest';
+      endpoint = 'http://localhost:8013/v1/chat/completions';
+    } else if (searchMode.value === 'global') {
+      // 全局搜索直接调用大模型API
+      model = 'gpt-4o:latest';
+      endpoint = 'http://localhost:8013/v1/chat/completions';
+    } else {
+      model = 'full-model:latest';
+      endpoint = 'http://localhost:8013/v1/chat/completions';
+    }
     
-    const response = await fetch('http://localhost:8013/v1/chat/completions', {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -306,12 +347,15 @@ const sendMessage = async () => {
     const answer = data.choices[0].message.content
     
     // 添加助手消息
-    messages.value.push({
-      id: Date.now() + 1,
-      role: 'assistant',
-      content: marked(answer),
-      time: new Date().toLocaleString('zh-CN')
-    })
+        messages.value.push({
+          id: Date.now() + 1,
+          role: 'assistant',
+          content: marked(answer),
+          time: new Date().toLocaleString('zh-CN')
+        })
+        
+        // 保存对话记录
+        saveMessages()
     
     // 更新历史记录
     historyList.value.unshift({
@@ -322,6 +366,9 @@ const sendMessage = async () => {
     if (historyList.value.length > 10) {
       historyList.value = historyList.value.slice(0, 10)
     }
+    
+    // 保存历史记录
+    saveHistoryList()
     
   } catch (error) {
     console.error('发送消息失败:', error)
@@ -349,6 +396,9 @@ const clearChat = () => {
       time: '2026-03-30 10:00'
     }
   ]
+  
+  // 保存清空后的对话记录
+  saveMessages()
 }
 
 // 加载历史记录
@@ -356,11 +406,7 @@ const loadHistory = (history) => {
   inputMessage.value = history.question
 }
 
-// 选择推荐问题
-const selectRecommendedQuestion = (question) => {
-  inputMessage.value = question
-  sendMessage()
-}
+
 
 // 模拟回答
 const getMockAnswer = (question) => {
@@ -490,6 +536,8 @@ const exportChat = () => {
 // 清空历史记录
 const clearHistory = () => {
   historyList.value = []
+  // 保存清空后的历史记录
+  saveHistoryList()
 }
 
 // 获取今日消息数
@@ -499,6 +547,11 @@ const getTodayMessages = () => {
 }
 
 onMounted(() => {
+  // 加载对话记录
+  loadMessages()
+  // 加载历史记录
+  loadHistoryList()
+  
   // 配置marked
   marked.setOptions({
     highlight: function(code, lang) {

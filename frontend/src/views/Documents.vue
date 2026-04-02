@@ -9,8 +9,11 @@
         </svg>
         文档管理
       </h1>
-      
-      <div class="toolbar-actions">
+    </div>
+
+    <!-- 操作面板 -->
+    <div class="operation-panel">
+      <div class="search-and-filters">
         <div class="search-box">
           <input 
             type="text" 
@@ -27,21 +30,25 @@
           </button>
         </div>
         
-        <el-select v-model="fileTypeFilter" placeholder="类型" size="small" style="width: 100px">
-          <el-option label="全部" value=""></el-option>
-          <el-option label="PDF" value=".pdf"></el-option>
-          <el-option label="Word" value=".doc"></el-option>
-          <el-option label="文本" value=".txt"></el-option>
-          <el-option label="MD" value=".md"></el-option>
-        </el-select>
-        
-        <el-select v-model="statusFilter" placeholder="状态" size="small" style="width: 100px">
-          <el-option label="全部" value=""></el-option>
-          <el-option label="已处理" value="processed"></el-option>
-          <el-option label="处理中" value="processing"></el-option>
-          <el-option label="未处理" value="pending"></el-option>
-        </el-select>
-        
+        <div class="filters">
+          <el-select v-model="fileTypeFilter" placeholder="类型" size="small" style="width: 100px">
+            <el-option label="全部" value=""></el-option>
+            <el-option label="PDF" value=".pdf"></el-option>
+            <el-option label="Word" value=".doc"></el-option>
+            <el-option label="文本" value=".txt"></el-option>
+            <el-option label="MD" value=".md"></el-option>
+          </el-select>
+          
+          <el-select v-model="statusFilter" placeholder="状态" size="small" style="width: 100px">
+            <el-option label="全部" value=""></el-option>
+            <el-option label="已处理" value="processed"></el-option>
+            <el-option label="处理中" value="processing"></el-option>
+            <el-option label="未处理" value="pending"></el-option>
+          </el-select>
+        </div>
+      </div>
+      
+      <div class="upload-buttons">
         <el-upload
           class="upload-btn"
           action="#"
@@ -50,14 +57,30 @@
           :limit="1"
           accept=".pdf,.doc,.docx,.txt,.md"
         >
-          <button class="btn-primary btn-sm">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <button class="btn-primary">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="7 10 12 15 17 10"></polyline>
             </svg>
-            上传
+            上传文件
           </button>
         </el-upload>
+        
+        <button class="btn-secondary" @click="selectFolder">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h16z"></path>
+          </svg>
+          上传文件夹
+        </button>
+        
+        <input 
+          type="file" 
+          ref="folderInput" 
+          style="display: none" 
+          webkitdirectory 
+          directory 
+          @change="handleFolderChange"
+        >
       </div>
     </div>
 
@@ -80,7 +103,10 @@
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                 </svg>
               </div>
-              <span class="name-text" :title="scope.row.name">{{ scope.row.name }}</span>
+              <div class="name-container">
+                <span class="name-text" :title="scope.row.name">{{ scope.row.name }}</span>
+                <span v-if="scope.row.path" class="path-text" :title="scope.row.path">{{ scope.row.path }}</span>
+              </div>
             </div>
           </template>
         </el-table-column>
@@ -95,18 +121,13 @@
           </template>
         </el-table-column>
         <el-table-column prop="uploadTime" label="上传时间" width="140"></el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="80" fixed="right">
           <template #default="scope">
             <div class="action-buttons">
               <button class="icon-btn action" @click="viewDocument(scope.row)" title="查看">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                   <circle cx="12" cy="12" r="3"></circle>
-                </svg>
-              </button>
-              <button class="icon-btn action process" @click="processDocument(scope.row)" v-if="scope.row.status === 'pending'" title="处理">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
                 </svg>
               </button>
               <button class="icon-btn action delete" @click="deleteDocument(scope.row.id)" title="删除">
@@ -267,19 +288,82 @@ const paginatedDocuments = computed(() => {
 })
 
 // 处理文件上传
-const handleFileChange = (file) => {
+const handleFileChange = async (file) => {
   console.log('文件上传:', file)
-  // 这里可以添加文件上传逻辑
-  // 模拟上传成功
-  const newDocument = {
-    id: Date.now(),
-    name: file.name,
-    size: file.size,
-    type: getFileExtension(file.name),
-    status: 'pending',
-    uploadTime: new Date().toLocaleString('zh-CN')
+  
+  try {
+    // 创建FormData对象
+    const formData = new FormData()
+    formData.append('file', file.raw)
+    
+    // 调用后端上传接口
+    const response = await fetch('http://localhost:8013/api/documents/upload', {
+      method: 'POST',
+      body: formData
+    })
+    
+    if (response.ok) {
+      const result = await response.json()
+      console.log('上传成功:', result)
+      // 重新加载文档列表
+      loadDocuments()
+      // 可以添加通知用户上传成功的逻辑
+    } else {
+      console.error('上传失败:', response.statusText)
+      // 可以添加通知用户上传失败的逻辑
+    }
+  } catch (error) {
+    console.error('上传异常:', error)
+    // 可以添加通知用户上传异常的逻辑
   }
-  documents.value.unshift(newDocument)
+}
+
+// 选择文件夹
+const folderInput = ref(null)
+
+const selectFolder = () => {
+  folderInput.value.click()
+}
+
+// 处理文件夹选择
+const handleFolderChange = async (event) => {
+  const files = event.target.files
+  if (files.length > 0) {
+    console.log('文件夹选择:', files)
+    
+    // 处理文件夹中的所有文件
+    for (const file of files) {
+      // 过滤支持的文件类型
+      const ext = file.name.split('.').pop().toLowerCase()
+      if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) {
+        try {
+          // 创建FormData对象
+          const formData = new FormData()
+          formData.append('file', file)
+          
+          // 调用后端上传接口
+          const response = await fetch('http://localhost:8013/api/documents/upload', {
+            method: 'POST',
+            body: formData
+          })
+          
+          if (response.ok) {
+            console.log('文件上传成功:', file.name)
+          } else {
+            console.error('文件上传失败:', file.name, response.statusText)
+          }
+        } catch (error) {
+          console.error('文件上传异常:', file.name, error)
+        }
+      }
+    }
+    
+    // 重新加载文档列表
+    loadDocuments()
+    
+    // 清空input，以便可以再次选择同一个文件夹
+    event.target.value = ''
+  }
 }
 
 // 搜索文档
@@ -295,32 +379,48 @@ const viewDocument = (document) => {
 }
 
 // 处理文档
-const processDocument = (document) => {
+const processDocument = async (document) => {
   console.log('处理文档:', document)
-  // 模拟处理过程
-  const index = documents.value.findIndex(doc => doc.id === document.id)
-  if (index !== -1) {
-    documents.value[index].status = 'processing'
-    setTimeout(() => {
-      documents.value[index].status = 'processed'
-      documents.value[index].processedTime = new Date().toLocaleString('zh-CN')
-      documents.value[index].stats = {
-        entities: Math.floor(Math.random() * 200) + 100,
-        relationships: Math.floor(Math.random() * 400) + 200,
-        chunks: Math.floor(Math.random() * 600) + 300,
-        processingTime: Math.floor(Math.random() * 30) + 15
-      }
-    }, 2000)
+  
+  try {
+    // 调用后端处理文档接口
+    const response = await fetch(`http://localhost:8013/api/documents/${document.id}/process`, {
+      method: 'POST'
+    })
+    
+    if (response.ok) {
+      const result = await response.json()
+      console.log('处理成功:', result)
+      // 重新加载文档列表
+      loadDocuments()
+    } else {
+      console.error('处理失败:', response.statusText)
+    }
+  } catch (error) {
+    console.error('处理异常:', error)
   }
 }
 
 // 删除文档
-const deleteDocument = (id) => {
+const deleteDocument = async (id) => {
   console.log('删除文档:', id)
-  // 模拟删除
-  const index = documents.value.findIndex(doc => doc.id === id)
-  if (index !== -1) {
-    documents.value.splice(index, 1)
+  
+  try {
+    // 调用后端删除文档接口
+    const response = await fetch(`http://localhost:8013/api/documents/${id}`, {
+      method: 'DELETE'
+    })
+    
+    if (response.ok) {
+      const result = await response.json()
+      console.log('删除成功:', result)
+      // 重新加载文档列表
+      loadDocuments()
+    } else {
+      console.error('删除失败:', response.statusText)
+    }
+  } catch (error) {
+    console.error('删除异常:', error)
   }
 }
 
@@ -416,11 +516,23 @@ const getStatusText = (status) => {
       gap: 8px;
       margin: 0;
     }
+  }
+  
+  .operation-panel {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    margin-bottom: 12px;
+    flex-shrink: 0;
     
-    .toolbar-actions {
+    .search-and-filters {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 12px;
       
       .search-box {
         display: flex;
@@ -443,6 +555,12 @@ const getStatusText = (status) => {
           }
         }
       }
+      
+      .filters {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
     }
   }
 
@@ -455,7 +573,7 @@ const getStatusText = (status) => {
     
     .document-name {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 8px;
       
       .file-icon {
@@ -467,6 +585,7 @@ const getStatusText = (status) => {
         justify-content: center;
         color: white;
         flex-shrink: 0;
+        margin-top: 2px;
         
         &.file-pdf { background: #e34c26; }
         &.file-doc, &.file-docx { background: #2b5797; }
@@ -474,13 +593,30 @@ const getStatusText = (status) => {
         &.file-md { background: #007acc; }
       }
       
-      .name-text {
-        font-size: 13px;
-        color: #303133;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        max-width: 200px;
+      .name-container {
+        flex: 1;
+        min-width: 0;
+        
+        .name-text {
+          font-size: 13px;
+          color: #303133;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          max-width: 300px;
+        }
+        
+        .path-text {
+          font-size: 11px;
+          color: #909399;
+          line-height: 1.2;
+          display: block;
+          margin-top: 2px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 300px;
+        }
       }
     }
     
@@ -639,9 +775,56 @@ const getStatusText = (status) => {
   }
 }
 
+.upload-buttons {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
 .upload-btn {
   :deep(.el-upload) {
     display: block;
+  }
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  }
+}
+
+.btn-secondary {
+  background: #f5f7fa;
+  color: #606266;
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  
+  &:hover {
+    background: #ecf5ff;
+    border-color: #c6e2ff;
+    color: #409eff;
   }
 }
 </style>

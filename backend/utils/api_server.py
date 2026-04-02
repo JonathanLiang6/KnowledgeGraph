@@ -569,6 +569,28 @@ async def chat_completions(request: ChatCompletionRequest):
             result = await local_search_engine.asearch(prompt)
             response_content = format_response(result.response)
             
+        elif request.model == "gpt-4o:latest":
+            # 直接调用大模型API
+            logger.info("直接调用大模型API")
+            from graphrag.query.llm.oai.chat_openai import ChatOpenAI
+            from config import config
+            
+            # 创建大模型客户端
+            llm = ChatOpenAI(
+                api_base=config.llm.api_base,
+                api_key=config.llm.api_key,
+                model=config.llm.chat_model,
+                api_type=OpenaiApiType.OpenAI,
+                max_tokens=config.llm.max_tokens,
+                temperature=config.llm.temperature,
+            )
+            
+            # 直接调用大模型
+            response = await llm.acomplete(
+                f"用户问题: {prompt}\n\n请提供详细的回答。"
+            )
+            response_content = format_response(response)
+            
         else:
             # 默认使用本地搜索
             logger.warning(f"未知模型: {request.model}，使用默认本地搜索")
@@ -634,6 +656,13 @@ async def list_models():
             "created": current_time - 80000,
             "owned_by": "combined",
             "description": "综合搜索模式 - 本地+全局"
+        },
+        {
+            "id": "gpt-4o:latest",
+            "object": "model",
+            "created": current_time - 70000,
+            "owned_by": "openai",
+            "description": "直接调用大模型API - 全局知识"
         }
     ]
     

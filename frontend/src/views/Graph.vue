@@ -631,14 +631,18 @@ const selectNode = (nodeId) => {
     // 查找相关实体
     const related = []
     graphData.value.links.forEach(link => {
-      if (link.source.id === nodeId) {
-        const targetNode = graphData.value.nodes.find(n => n.id === link.target.id)
+      // 处理link.source和link.target可能是字符串或对象的情况
+      const sourceId = typeof link.source === 'object' ? link.source.id : link.source
+      const targetId = typeof link.target === 'object' ? link.target.id : link.target
+      
+      if (sourceId === nodeId) {
+        const targetNode = graphData.value.nodes.find(n => n.id === targetId)
         if (targetNode) {
           related.push({ id: targetNode.id, name: targetNode.name })
         }
       }
-      if (link.target.id === nodeId) {
-        const sourceNode = graphData.value.nodes.find(n => n.id === link.source.id)
+      if (targetId === nodeId) {
+        const sourceNode = graphData.value.nodes.find(n => n.id === sourceId)
         if (sourceNode) {
           related.push({ id: sourceNode.id, name: sourceNode.name })
         }

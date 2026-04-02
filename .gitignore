@@ -47,6 +47,16 @@ logs/
 .env
 .env.local
 .env.*.local
+.env.development
+.env.production
+
+# API Keys and Secrets
+*.key
+*.pem
+secrets.json
+credentials.json
+config.local.yaml
+config.prod.yaml
 
 # Frontend
 node_modules/

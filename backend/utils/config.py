@@ -50,7 +50,7 @@ class Config:
     TEXT_UNIT_TABLE = 'create_final_text_units'
     
     # 本地文件夹数据源配置
-    LOCAL_DATA_DIR = os.getenv('LOCAL_DATA_DIR', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'inputs'))
+    LOCAL_DATA_DIR = os.getenv('LOCAL_DATA_DIR', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'inputs', 'files'))
     
     @property
     def is_api_key_set(self):

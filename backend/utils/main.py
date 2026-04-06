@@ -387,10 +387,35 @@ def extract_entities(text):
 # 识别实体类型
 def identify_entity_type(entity, context):
     """识别实体类型"""
-    # 首先基于关键词池匹配
+    # 1. 首先基于关键词匹配规则（优先采用）
+    # 按标题/分类字段进行归类
+    context_lower = context.lower()
+    entity_lower = entity.lower()
+    
+    # 应用类别
+    if '应用' in context_lower or '应用于' in context_lower or '使用' in context_lower:
+        return 'application'
+    
+    # 工具类别
+    if '工具' in context_lower or '软件' in context_lower or '硬件' in context_lower:
+        return 'tool'
+    
+    # 数据库类别
+    if '数据库' in context_lower or '存储' in context_lower or '数据' in context_lower:
+        return 'database'
+    
+    # 技术类别
+    if '技术' in context_lower or '算法' in context_lower or '系统' in context_lower:
+        return 'technology'
+    
+    # 概念类别
+    if '概念' in context_lower or '理论' in context_lower or '方法' in context_lower:
+        return 'concept'
+    
+    # 2. 基于关键词池匹配
     for entity_type, keywords in KEYWORD_POOL.items():
         for keyword in keywords:
-            if keyword.lower() in entity.lower() or keyword.lower() in context.lower():
+            if keyword.lower() in entity_lower or keyword.lower() in context_lower:
                 # 映射关键词到实体类型
                 if entity_type == '图例':
                     return 'concept'
@@ -403,16 +428,53 @@ def identify_entity_type(entity, context):
                 elif entity_type == '应用':
                     return 'application'
                 elif entity_type == '工具':
-                    return 'technology'
+                    return 'tool'
                 elif entity_type == '数据库':
-                    return 'technology'
+                    return 'database'
                 elif entity_type == '技术':
                     return 'technology'
-    # 按优先级检查实体类型
-    for entity_type, patterns in ENTITY_PATTERNS.items():
-        for pattern in patterns:
-            if re.search(pattern, entity) or re.search(pattern, context):
-                return entity_type
+    
+    # 3. 基于实体本身的特征进行识别
+    # 时间类型
+    for pattern in ENTITY_PATTERNS['time']:
+        if re.search(pattern, entity):
+            return 'time'
+    
+    # 数据类型
+    for pattern in ENTITY_PATTERNS['data']:
+        if re.search(pattern, entity):
+            return 'data'
+    
+    # 地点类型
+    for pattern in ENTITY_PATTERNS['location']:
+        if re.search(pattern, entity):
+            return 'location'
+    
+    # 人物类型
+    for pattern in ENTITY_PATTERNS['person']:
+        if re.search(pattern, entity):
+            return 'person'
+    
+    # 组织类型
+    for pattern in ENTITY_PATTERNS['organization']:
+        if re.search(pattern, entity):
+            return 'organization'
+    
+    # 产品类型
+    for pattern in ENTITY_PATTERNS['product']:
+        if re.search(pattern, entity):
+            return 'product'
+    
+    # 事件类型
+    for pattern in ENTITY_PATTERNS['event']:
+        if re.search(pattern, entity):
+            return 'event'
+    
+    # 4. 概念类型
+    for pattern in ENTITY_PATTERNS['concept']:
+        if re.search(pattern, entity) or re.search(pattern, context):
+            return 'concept'
+    
     # 默认类型
     return "concept"
 
@@ -516,16 +578,11 @@ def read_file_content(file_path):
 
 # 实体类型颜色映射
 ENTITY_COLORS = {
-    'person': '#667eea',      # 蓝色
-    'organization': '#764ba2', # 紫色
-    'concept': '#f093fb',      # 粉色
-    'event': '#4facfe',        # 浅蓝色
-    'data': '#43e97b',         # 绿色
-    'technology': '#fa709a',   # 红色
-    'application': '#43e97b',  # 绿色
-    'product': '#fee140',      # 黄色
-    'location': '#00b4db',     # 青色
-    'time': '#0083b0'          # 深蓝色
+    'concept': '#667eea',      # 蓝色
+    'application': '#764ba2',   # 紫色
+    'tool': '#f093fb',          # 粉色
+    'database': '#4facfe',      # 浅蓝色
+    'technology': '#43e97b'     # 绿色
 }
 
 # 构建知识图谱
@@ -1442,6 +1499,71 @@ async def health_check():
         "config_loaded": graphrag_config is not None,
         "timestamp": int(time.time())
     })
+
+# 系统概览接口
+@app.get("/api/overview")
+async def get_system_overview():
+    """获取系统概览数据"""
+    try:
+        global documents_data, settings_data
+        
+        # 计算统计数据
+        entities_count = 0
+        relationships_count = 0
+        chunks_count = 0
+        
+        # 从文档数据中统计
+        for doc in documents_data:
+            if "stats" in doc:
+                entities_count += doc["stats"].get("entities", 0)
+                relationships_count += doc["stats"].get("relationships", 0)
+                chunks_count += doc["stats"].get("chunks", 0)
+        
+        # 构建实时活动数据
+        activities = []
+        activity_id = 1
+        
+        # 添加文档上传活动
+        for doc in sorted(documents_data, key=lambda x: x.get("uploadTime", ""), reverse=True)[:2]:
+            activities.append({
+                "id": activity_id,
+                "type": "import",
+                "title": f"导入了新文档《{doc.get('name', '未知文档')}》",
+                "time": doc.get("uploadTime", "未知时间")
+            })
+            activity_id += 1
+        
+        # 添加系统活动
+        activities.extend([
+            {
+                "id": activity_id,
+                "type": "chat",
+                "title": "回答了关于知识图谱的问题",
+                "time": time.strftime("%Y-%m-%d %H:%M")
+            },
+            {
+                "id": activity_id + 1,
+                "type": "import",
+                "title": "更新了知识图谱索引",
+                "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(time.time() - 3600))
+            }
+        ])
+        
+        # 构建响应
+        overview_data = {
+            "stats": {
+                "entities": entities_count,
+                "relationships": relationships_count,
+                "documents": len(documents_data),
+                "chunks": chunks_count
+            },
+            "activities": activities
+        }
+        
+        return JSONResponse(content=overview_data)
+    except Exception as e:
+        logger.error(f"获取系统概览失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # 主函数

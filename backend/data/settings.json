@@ -8,7 +8,7 @@
   "system": {
     "batchSize": 5,
     "chunkSize": 1000,
-    "overlapRatio": 0.05,
+    "overlapRatio": 0.1,
     "entityThreshold": 0.7,
     "relationThreshold": 0.6
   },

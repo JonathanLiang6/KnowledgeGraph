@@ -54,7 +54,7 @@
     </main>
 
     <!-- 页脚 -->
-    <footer style="text-align: center; padding: 20px; color: #909399; font-size: 14px; border-top: 1px solid #ebeef5; margin-top: 40px;">
+    <footer class="app-footer">
       <p>© 2026 知识图谱系统 | 基于 GraphRAG 和 智谱AI</p>
     </footer>
   </div>
@@ -96,39 +96,40 @@ onUnmounted(() => {
 .menu-toggle {
   background: none;
   border: none;
-  color: white;
+  color: var(--text-primary);
   font-size: 20px;
   cursor: pointer;
-  padding: 8px;
-  border-radius: 4px;
-  transition: background 0.3s ease;
+  padding: var(--spacing-xs);
+  border-radius: var(--radius-md);
+  transition: var(--transition);
   
   &:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--bg-hover);
   }
 }
 
 .mobile-menu {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 10px 0;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  animation: slideDown 0.3s ease;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  padding: var(--spacing-sm) 0;
+  animation: slideDown 0.2s ease;
   
   .mobile-nav-item {
     display: block;
-    color: white;
+    color: var(--text-secondary);
     text-decoration: none;
-    padding: 12px 20px;
+    padding: var(--spacing-sm) var(--spacing-md);
     font-size: 14px;
     font-weight: 500;
-    transition: background 0.3s ease;
+    transition: var(--transition);
     
     &:hover {
-      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-primary);
+      background: var(--bg-hover);
     }
     
     &.active {
-      background: rgba(255, 255, 255, 0.2);
+      color: var(--primary-light);
       font-weight: 600;
     }
   }

@@ -425,6 +425,7 @@ const initGraph = () => {
     .append('svg')
     .attr('width', width)
     .attr('height', height)
+    .attr('overflow', 'hidden')
 
   // 添加缩放功能
   zoom = d3.zoom()
@@ -554,6 +555,7 @@ const applyLayout = () => {
     .attr('fill', '#333')
     .attr('font-size', '12px')
     .attr('font-weight', '500')
+    .attr('pointer-events', 'none')
 
   // 添加关系标签
   const linkLabel = container.append('g')
@@ -841,8 +843,10 @@ onUnmounted(() => {
     display: grid;
     grid-template-columns: 280px 1fr 280px;
     gap: 20px;
-    height: calc(100vh - 180px);
+    min-height: 600px;
+    height: calc(100vh - 160px);
     max-height: 800px;
+    overflow: hidden;
 
     @media (max-width: 1200px) {
       grid-template-columns: 260px 1fr 260px;
@@ -852,6 +856,7 @@ onUnmounted(() => {
       grid-template-columns: 1fr;
       height: auto;
       max-height: none;
+      min-height: 600px;
     }
   }
 
@@ -860,6 +865,8 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     gap: 20px;
+    overflow-y: auto;
+    padding-bottom: 20px;
 
     .card {
       background: white;
@@ -867,6 +874,7 @@ onUnmounted(() => {
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
       padding: 20px;
       transition: all 0.3s ease;
+      flex-shrink: 0;
       
       &:hover {
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
@@ -981,12 +989,15 @@ onUnmounted(() => {
 
   .graph-main {
     position: relative;
-    background: linear-gradient(135deg, #f5f7fa 0%, #e4e8f0 100%);
+    background: #f5f7fa;
     border-radius: 16px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    margin: 0;
+    padding: 0;
+    height: 100%;
 
     .graph-canvas {
       width: 100%;

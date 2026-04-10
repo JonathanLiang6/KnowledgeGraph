@@ -91,7 +91,7 @@ KnowledgeGraph/
 ## 🚀 快速开始
 
 ### 环境要求
-- Python 3.8+
+- Python 3.10 - 3.12
 - Node.js 16+
 - 智谱AI API 密钥
 
@@ -298,7 +298,7 @@ Content-Type: application/json
 
 **问题**：安装依赖时失败
 
-**解决**：确保使用 Python 3.8+，并尝试更新 pip：
+**解决**：确保使用 Python 3.10 - 3.12，并尝试更新 pip：
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt

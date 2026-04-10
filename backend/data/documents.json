@@ -1,17 +1,1 @@
-[
-  {
-    "name": "系统设计说明书.pdf",
-    "path": "系统设计说明书.pdf",
-    "size": 477544,
-    "type": "PDF",
-    "status": "processed",
-    "id": 1,
-    "uploadTime": "2026-04-02 19:15",
-    "processedTime": "2026-04-02 19:15:37",
-    "stats": {
-      "entities": 50,
-      "relationships": 836,
-      "chunks": 119
-    }
-  }
-]
+[]

@@ -60,10 +60,13 @@ KnowledgeGraph/
 │   │   └── settings.json       # 系统设置
 │   ├── inputs/                 # 输入数据
 │   │   ├── artifacts/          # GraphRAG 生成的数据
+│   │   ├── files/              # 用户上传的文件
 │   │   └── reports/            # 日志报告
 │   ├── prompts/                # LLM 提示词模板
 │   ├── utils/                  # 工具模块
+│   │   ├── __init__.py         # 包初始化
 │   │   ├── config.py           # 配置管理
+│   │   ├── entity_extractor.py # 实体提取
 │   │   ├── helpers.py          # 工具函数
 │   │   └── main.py             # FastAPI 主应用
 │   ├── .env.example            # 环境变量示例
@@ -82,10 +85,14 @@ KnowledgeGraph/
 │   │   │   └── Settings.vue    # 系统设置
 │   │   ├── App.vue             # 根组件
 │   │   └── main.js             # 入口文件
-│   ├── index.html
-│   ├── package.json
-│   └── vite.config.js
-└── README.md
+│   ├── .eslintrc.cjs           # ESLint 配置
+│   ├── .gitignore              # Git 忽略文件
+│   ├── index.html              # HTML 模板
+│   ├── package.json            # 前端依赖
+│   ├── package-lock.json       # 依赖版本锁定
+│   └── vite.config.js          # Vite 配置
+├── .gitignore                  # 根目录 Git 忽略文件
+└── README.md                   # 项目说明文档
 ```
 
 ## 🚀 快速开始
@@ -274,7 +281,7 @@ Content-Type: application/json
 
 | 类型 | 路径 | 说明 |
 |------|------|------|
-| 上传文档 | `backend/inputs/` | 用户上传的原始文件 |
+| 上传文档 | `backend/inputs/files/` | 用户上传的原始文件 |
 | 图谱数据 | `backend/inputs/artifacts/` | GraphRAG 生成的 Parquet 文件 |
 | 缓存数据 | `backend/cache/` | LLM 调用缓存 |
 | 持久化数据 | `backend/data/` | documents.json, settings.json |

@@ -293,11 +293,11 @@ const animateStats = () => {
 <style scoped>
 .home {
   .hero-section {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
     padding: 60px 0;
-    margin-bottom: 40px;
-    border-radius: 12px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    margin-bottom: var(--spacing-xl);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 0 30px rgba(65, 105, 225, 0.2);
     
     .hero-content {
       text-align: center;
@@ -306,11 +306,11 @@ const animateStats = () => {
       .page-title {
         font-size: 36px;
         font-weight: 700;
-        margin-bottom: 16px;
+        margin-bottom: var(--spacing-sm);
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 12px;
+        gap: var(--spacing-sm);
         
         svg {
           animation: pulse 2s infinite;
@@ -327,8 +327,8 @@ const animateStats = () => {
   .overview-cards {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 24px;
-    margin-bottom: 40px;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-xl);
 
     @media (max-width: 768px) {
       grid-template-columns: 1fr;
@@ -336,32 +336,32 @@ const animateStats = () => {
   }
 
   .card {
-    background: white;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-    transition: all 0.3s ease;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    transition: var(--transition);
     
     &:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+      border-color: var(--primary-color);
+      box-shadow: 0 0 20px rgba(65, 105, 225, 0.1);
     }
     
     .card-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 20px 24px;
-      border-bottom: 1px solid #f0f2f5;
+      padding: var(--spacing-md);
+      border-bottom: 1px solid var(--border-color);
       
       h3 {
         font-size: 18px;
         font-weight: 600;
-        color: #303133;
+        color: var(--text-primary);
         margin: 0;
       }
       
       .badge {
-        background: #67c23a;
+        background: var(--accent-green);
         color: white;
         padding: 4px 12px;
         border-radius: 12px;
@@ -370,32 +370,31 @@ const animateStats = () => {
       }
       
       .btn-sm {
-        background: #f5f7fa;
-        border: 1px solid #dcdfe6;
-        border-radius: 4px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
         padding: 4px 12px;
         font-size: 12px;
-        color: #606266;
+        color: var(--text-secondary);
         cursor: pointer;
-        transition: all 0.3s ease;
+        transition: var(--transition);
         
         &:hover {
-          background: #ecf5ff;
-          border-color: #c6e2ff;
-          color: #409eff;
+          border-color: var(--primary-color);
+          color: var(--primary-light);
         }
       }
     }
     
     .card-body {
-      padding: 24px;
+      padding: var(--spacing-md);
     }
   }
 
   .stats-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 20px;
+    gap: var(--spacing-md);
 
     @media (max-width: 768px) {
       grid-template-columns: repeat(2, 1fr);
@@ -404,40 +403,42 @@ const animateStats = () => {
 
   .stat-item {
     text-align: center;
-    padding: 20px;
-    background: #f5f7fa;
-    border-radius: 8px;
-    transition: all 0.3s ease;
+    padding: var(--spacing-md);
+    background: var(--bg-hover);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    transition: var(--transition);
     cursor: pointer;
     
     &:hover {
-      background: #ecf5ff;
+      border-color: var(--primary-color);
       transform: translateY(-2px);
     }
     
     .stat-icon {
       width: 48px;
       height: 48px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
       margin: 0 auto 12px;
       color: white;
+      box-shadow: 0 4px 12px rgba(65, 105, 225, 0.3);
     }
     
     .stat-value {
       font-size: 28px;
       font-weight: 700;
-      color: #667eea;
+      color: var(--primary-light);
       margin-bottom: 6px;
       animation: countUp 1s ease-out;
     }
     
     .stat-label {
       font-size: 14px;
-      color: #606266;
+      color: var(--text-secondary);
     }
   }
 
@@ -446,18 +447,18 @@ const animateStats = () => {
       display: flex;
       align-items: center;
       padding: 16px 0;
-      border-bottom: 1px solid #f0f2f5;
+      border-bottom: 1px solid var(--border-color);
       cursor: pointer;
-      transition: all 0.3s ease;
+      transition: var(--transition);
       
       &:last-child {
         border-bottom: none;
       }
       
       &:hover {
-        background: #f5f7fa;
+        background: var(--bg-hover);
         padding-left: 12px;
-        border-radius: 8px;
+        border-radius: var(--radius-md);
       }
       
       .activity-icon {
@@ -469,16 +470,16 @@ const animateStats = () => {
         justify-content: center;
         margin-right: 16px;
         color: white;
-        transition: all 0.3s ease;
+        transition: var(--transition);
         
         &.import {
-          background: #67c23a;
+          background: var(--accent-green);
         }
         &.chat {
-          background: #409eff;
+          background: var(--primary-light);
         }
         &.other {
-          background: #e6a23c;
+          background: var(--accent-purple);
         }
       }
       
@@ -487,23 +488,23 @@ const animateStats = () => {
         
         .activity-title {
           font-size: 14px;
-          color: #303133;
+          color: var(--text-primary);
           margin-bottom: 4px;
           font-weight: 500;
         }
         
         .activity-time {
           font-size: 12px;
-          color: #909399;
+          color: var(--text-secondary);
         }
       }
       
       .activity-arrow {
-        color: #c0c4cc;
-        transition: all 0.3s ease;
+        color: var(--text-secondary);
+        transition: var(--transition);
         
         &:hover {
-          color: #409eff;
+          color: var(--primary-light);
         }
       }
     }
@@ -512,35 +513,37 @@ const animateStats = () => {
   .feature-cards {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 24px;
-    margin-bottom: 40px;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-xl);
   }
 
   .feature-card {
     text-align: center;
     padding: 40px 24px;
-    background: white;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-    transition: all 0.3s ease;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    transition: var(--transition);
     cursor: pointer;
     
     &:hover {
+      border-color: var(--primary-color);
       transform: translateY(-8px);
-      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
+      box-shadow: 0 0 20px rgba(65, 105, 225, 0.1);
     }
     
     .feature-icon {
       width: 96px;
       height: 96px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
       margin: 0 auto 24px;
       color: white;
-      transition: all 0.3s ease;
+      transition: var(--transition);
+      box-shadow: 0 4px 20px rgba(65, 105, 225, 0.3);
       
       &:hover {
         transform: scale(1.1);
@@ -551,46 +554,39 @@ const animateStats = () => {
       font-size: 20px;
       font-weight: 600;
       margin-bottom: 12px;
-      color: #303133;
+      color: var(--text-primary);
     }
     
     p {
       font-size: 14px;
-      color: #606266;
+      color: var(--text-secondary);
       margin-bottom: 24px;
       line-height: 1.6;
     }
     
     .btn-primary {
       display: inline-block;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
       padding: 12px 24px;
-      border-radius: 8px;
+      border-radius: var(--radius-md);
       font-size: 14px;
       font-weight: 500;
       text-decoration: none;
-      transition: all 0.3s ease;
-      
-      &:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-      }
+      transition: var(--transition);
     }
   }
   
   .tech-stack {
-    background: white;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
     padding: 32px;
-    margin-bottom: 40px;
+    margin-bottom: var(--spacing-xl);
     
     h2 {
       text-align: center;
       font-size: 24px;
       font-weight: 600;
-      color: #303133;
+      color: var(--text-primary);
       margin-bottom: 32px;
     }
     
@@ -609,14 +605,16 @@ const animateStats = () => {
         svg {
           width: 64px;
           height: 64px;
-          background: #f5f7fa;
-          border-radius: 12px;
+          background: var(--bg-hover);
+          border: 1px solid var(--border-color);
+          border-radius: var(--radius-lg);
           padding: 16px;
-          color: #667eea;
-          transition: all 0.3s ease;
+          color: var(--primary-light);
+          transition: var(--transition);
           
           &:hover {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
+            border-color: var(--primary-color);
             color: white;
             transform: scale(1.1);
           }
@@ -624,7 +622,7 @@ const animateStats = () => {
         
         span {
           font-size: 14px;
-          color: #606266;
+          color: var(--text-secondary);
           font-weight: 500;
         }
       }

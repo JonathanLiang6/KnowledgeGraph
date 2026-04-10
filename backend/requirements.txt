@@ -1,43 +1,19 @@
-# 知识图谱系统依赖包
-# 安装命令: pip install -r requirements.txt
-
-# ==================== Web框架 ====================
-fastapi                       # FastAPI Web框架
-uvicorn                       # ASGI服务器
-
-# ==================== 知识图谱核心 ====================
-graphrag                      # Microsoft GraphRAG知识图谱框架
-
-# ==================== 向量数据库 ====================
-lancedb                       # LanceDB向量数据库
-
-# ==================== 数据处理 ====================
-pandas                        # 数据处理和分析
-numpy                         # 数值计算
-pyarrow                       # Parquet文件处理
-
-# ==================== 大模型相关 ====================
-tiktoken                      # OpenAI Token计数
-openai                        # OpenAI API客户端
-
-# ==================== 数据验证 ====================
-pydantic                      # 数据模型验证
-
-# ==================== 环境配置 ====================
-python-dotenv                 # 环境变量管理
-pyyaml                        # YAML配置文件解析
-
-# ==================== 异步支持 ====================
-aiohttp                       # 异步HTTP客户端
-
-# ==================== 工具库 ====================
-python-multipart              # 文件上传支持
-
-# ==================== NLP处理 ====================
-jieba                         # 中文分词
-nltk                          # 自然语言处理工具包
-spacy                         # 自然语言处理库
-
-# ==================== 文件处理 ====================
-PyPDF2                        # PDF文件处理
-python-docx                    # Word文件处理
+fastapi
+uvicorn
+graphrag
+lancedb
+pandas
+numpy
+pyarrow
+tiktoken
+openai
+pydantic
+python-dotenv
+pyyaml
+aiohttp
+python-multipart
+jieba
+nltk
+spacy
+PyPDF2
+python-docx

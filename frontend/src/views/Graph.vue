@@ -363,6 +363,22 @@ const loadGraphData = async () => {
       const data = await response.json()
       if (data.nodes && data.links) {
         graphData.value = data
+        
+        // 动态计算最常用的实体类型并更新图例
+        if (data.nodes && data.nodes.length > 0) {
+          const typeCounts = {}
+          data.nodes.forEach(n => {
+            typeCounts[n.type] = (typeCounts[n.type] || 0) + 1
+          })
+          
+          // 仅保留最常用的几个图例（例如前8个）
+          const sortedTypes = Object.keys(typeCounts).sort((a, b) => typeCounts[b] - typeCounts[a]).slice(0, 8)
+          entityTypes.value = sortedTypes.map(type => ({
+            label: type,
+            value: type
+          }))
+        }
+        
         updateGraphStats()
       }
     } else {
@@ -503,7 +519,7 @@ const applyLayout = () => {
     .append('circle')
     .attr('class', 'node')
     .attr('r', nodeSize.value)
-    .attr('fill', d => getNodeColor(d.type))
+    .attr('fill', d => d.color || getNodeColor(d.type))
     .attr('stroke', '#fff')
     .attr('stroke-width', 2)
     .call(d3.drag()
@@ -614,6 +630,12 @@ const dragended = (event, d) => {
 
 // 获取节点颜色
 const getNodeColor = (type) => {
+  // 优先从图谱数据中获取
+  if (graphData.value.legend) {
+    const legendItem = graphData.value.legend.find(l => l.entity_type === type)
+    if (legendItem) return legendItem.color
+  }
+  
   const colors = {
     concept: '#667eea',      // 蓝色
     application: '#764ba2',   // 紫色

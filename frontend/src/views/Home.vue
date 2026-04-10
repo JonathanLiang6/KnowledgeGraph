@@ -216,43 +216,19 @@ import { ref, onMounted } from 'vue'
 
 // 系统统计数据
 const stats = ref({
-  entities: 1280,
-  relationships: 2560,
-  documents: 12,
-  chunks: 384
+  entities: 0,
+  relationships: 0,
+  documents: 0,
+  chunks: 0
 })
 
 // 最近活动
-const activities = ref([
-  {
-    id: 1,
-    type: 'import',
-    title: '导入了新文档《人工智能导论》',
-    time: '2026-03-30 10:30'
-  },
-  {
-    id: 2,
-    type: 'chat',
-    title: '回答了关于机器学习的问题',
-    time: '2026-03-30 09:15'
-  },
-  {
-    id: 3,
-    type: 'import',
-    title: '更新了知识图谱索引',
-    time: '2026-03-29 16:45'
-  },
-  {
-    id: 4,
-    type: 'chat',
-    title: '回答了关于深度学习的问题',
-    time: '2026-03-29 14:20'
-  }
-])
+const activities = ref([])
 
 // 交互状态
 const statHover = ref(false)
 const cardHover = ref(false)
+const loading = ref(true)
 
 // 查看活动详情
 const viewActivity = (activity) => {
@@ -260,21 +236,42 @@ const viewActivity = (activity) => {
   // 这里可以添加跳转到活动详情页面的逻辑
 }
 
+// 加载系统概览数据
+const loadOverviewData = async () => {
+  loading.value = true
+  try {
+    const response = await fetch('http://localhost:8013/api/overview')
+    if (response.ok) {
+      const data = await response.json()
+      stats.value = data.stats
+      activities.value = data.activities
+      // 为统计数字添加动画效果
+      animateStats()
+    } else {
+      console.error('加载系统概览失败')
+    }
+  } catch (error) {
+    console.error('加载系统概览异常:', error)
+  } finally {
+    loading.value = false
+  }
+}
+
 onMounted(() => {
-  // 模拟加载数据
-  console.log('首页数据加载完成')
+  // 加载实时数据
+  loadOverviewData()
   
-  // 为统计数字添加动画效果
-  animateStats()
+  // 每30秒刷新一次数据
+  setInterval(loadOverviewData, 30000)
 })
 
 // 统计数字动画
 const animateStats = () => {
   const targets = [
-    { ref: stats.value, key: 'entities', target: 1280 },
-    { ref: stats.value, key: 'relationships', target: 2560 },
-    { ref: stats.value, key: 'documents', target: 12 },
-    { ref: stats.value, key: 'chunks', target: 384 }
+    { ref: stats.value, key: 'entities', target: stats.value.entities },
+    { ref: stats.value, key: 'relationships', target: stats.value.relationships },
+    { ref: stats.value, key: 'documents', target: stats.value.documents },
+    { ref: stats.value, key: 'chunks', target: stats.value.chunks }
   ]
   
   targets.forEach(item => {

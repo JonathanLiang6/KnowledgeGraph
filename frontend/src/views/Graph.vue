@@ -615,11 +615,11 @@ const dragended = (event, d) => {
 // 获取节点颜色
 const getNodeColor = (type) => {
   const colors = {
-    concept: '#667eea',
-    application: '#764ba2',
-    tool: '#f093fb',
-    database: '#4facfe',
-    technology: '#43e97b'
+    concept: '#667eea',      // 蓝色
+    application: '#764ba2',   // 紫色
+    tool: '#f093fb',          // 粉色
+    database: '#4facfe',      // 浅蓝色
+    technology: '#43e97b'     // 绿色
   }
   return colors[type] || '#999'
 }

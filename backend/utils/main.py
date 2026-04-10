@@ -264,8 +264,12 @@ def preprocess_text(text):
     for sentence in sentences:
         # 分词
         words = jieba.cut(sentence)
-        # 去停用词
-        words = [word for word in words if word not in STOP_WORDS and word.strip()]
+        # 去停用词、纯数字和无意义符号
+        words = [word for word in words if 
+                 word not in STOP_WORDS and 
+                 word.strip() and 
+                 not word.isdigit() and 
+                 not re.match(r'^[^a-zA-Z0-9\u4e00-\u9fa5]+$', word)]
         if words:
             processed_sentences.append((sentence, words))
     
@@ -273,6 +277,18 @@ def preprocess_text(text):
 
 # 实体类型识别
 import re
+
+# 关键词池
+KEYWORD_POOL = {
+    '图例': ['图例', 'legend'],
+    '实体': ['实体', 'entity', 'entities'],
+    '关系': ['关系', 'relation', 'relationships'],
+    '概念': ['概念', 'concept', 'concepts'],
+    '应用': ['应用', 'application', 'applications'],
+    '工具': ['工具', 'tool', 'tools'],
+    '数据库': ['数据库', 'database', 'databases'],
+    '技术': ['技术', 'technology', 'technologies']
+}
 
 # 实体类型模式
 ENTITY_PATTERNS = {
@@ -371,6 +387,27 @@ def extract_entities(text):
 # 识别实体类型
 def identify_entity_type(entity, context):
     """识别实体类型"""
+    # 首先基于关键词池匹配
+    for entity_type, keywords in KEYWORD_POOL.items():
+        for keyword in keywords:
+            if keyword.lower() in entity.lower() or keyword.lower() in context.lower():
+                # 映射关键词到实体类型
+                if entity_type == '图例':
+                    return 'concept'
+                elif entity_type == '实体':
+                    return 'concept'
+                elif entity_type == '关系':
+                    return 'concept'
+                elif entity_type == '概念':
+                    return 'concept'
+                elif entity_type == '应用':
+                    return 'application'
+                elif entity_type == '工具':
+                    return 'technology'
+                elif entity_type == '数据库':
+                    return 'technology'
+                elif entity_type == '技术':
+                    return 'technology'
     # 按优先级检查实体类型
     for entity_type, patterns in ENTITY_PATTERNS.items():
         for pattern in patterns:
@@ -485,6 +522,7 @@ ENTITY_COLORS = {
     'event': '#4facfe',        # 浅蓝色
     'data': '#43e97b',         # 绿色
     'technology': '#fa709a',   # 红色
+    'application': '#43e97b',  # 绿色
     'product': '#fee140',      # 黄色
     'location': '#00b4db',     # 青色
     'time': '#0083b0'          # 深蓝色

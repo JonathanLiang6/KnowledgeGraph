@@ -305,7 +305,7 @@ const handleFileChange = async (file) => {
     if (response.ok) {
       const result = await response.json()
       console.log('上传成功:', result)
-      // 重新加载文档列表
+      // 重新加载文档列表，确保文件永久显示
       loadDocuments()
       // 可以添加通知用户上传成功的逻辑
     } else {
@@ -784,6 +784,11 @@ const getStatusText = (status) => {
 .upload-btn {
   :deep(.el-upload) {
     display: block;
+  }
+  
+  :deep(.el-upload__button) {
+    display: flex;
+    align-items: center;
   }
 }
 

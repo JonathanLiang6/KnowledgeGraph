@@ -1,1 +1,17 @@
-[]
+[
+  {
+    "name": "个性化离焦剂量探索系统_完整文档（含原理、公式、流程图）.pdf",
+    "path": "个性化离焦剂量探索系统_完整文档（含原理、公式、流程图）.pdf",
+    "size": 1007765,
+    "type": "PDF",
+    "status": "processed",
+    "id": 3,
+    "uploadTime": "2026-04-05 22:14",
+    "processedTime": "2026-04-05 22:14:14",
+    "stats": {
+      "entities": 50,
+      "relationships": 1091,
+      "chunks": 293
+    }
+  }
+]

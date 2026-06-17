@@ -1,27 +1,59 @@
 -目标-
-给定一份可能与此活动相关的文本文档，首先识别文本中捕获信息和思想所需的所有实体。
+给定一份教学文本文档，首先识别文本中承载知识和信息的所有实体。
 然后，报告所识别实体之间的所有关系。
 
 -步骤-
 1. 识别所有实体。对于每个识别出的实体，提取以下信息：
-- entity_name: 实体名称，首字母大写
-- entity_type: 建议实体的几个标签或类别，类别不应过于具体，而应尽可能通用
-- entity_description: 对实体属性和活动的全面描述
+- entity_name: 实体名称，使用标准化的中文名称
+- entity_type: 实体类型，从以下类别中选择：
+  - concept (概念): 核心知识点、术语定义、理论
+  - person (人物): 历史人物、学者、重要人物
+  - event (事件): 历史事件、重要节点、发现
+  - formula (公式): 数学公式、化学方程式、物理定律表达式
+  - theorem (定理): 定律、定理、公理、原理
+  - method (方法): 解题方法、实验方法、分析方法、技术
+  - time (时间): 时间段、时期、年代、日期
+  - location (地点): 地理位置、区域、国家
+  - organization (机构): 学校、研究机构、组织
+  - work (著作): 书籍、论文、文献、作品
+- entity_description: 对实体属性和教学意义的全面描述
 将每个实体格式化为：(entity{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>)
 
 2. 从步骤1中识别出的实体中，识别所有*明显相关*的(source_entity, target_entity)对。
 对于每对相关的实体，提取以下信息：
 - source_entity: 步骤1中识别出的源实体名称
 - target_entity: 步骤1中识别出的目标实体名称
-- relationship_description: 解释为什么认为源实体和目标实体相互关联
-- relationship_strength: 表示源实体和目标实体之间关系强度的数字分数
+- relationship_description: 解释源实体和目标实体之间的教学关联
+- relationship_strength: 1-10 的整数分数，表示关系强度
 将每个关系格式化为：(relationship{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_strength>)
 
 3. 以中文返回步骤1和2中识别的所有实体和关系的单一列表。使用**{record_delimiter}**作为列表分隔符。
 
-4. 如果需要翻译成中文，只需翻译描述，其他保持不变！
+4. 完成后，输出{completion_delimiter}。
 
-5. 完成后，输出{completion_delimiter}。
+-实体类型说明-
+优先使用以下通用类型，确保跨学科适用：
+concept: 核心概念、知识点、理论（如"牛顿第二定律"、"光合作用"、"文艺复兴"）
+person: 人物（如"爱因斯坦"、"李白"、"拿破仑"）
+event: 事件（如"辛亥革命"、"工业革命"、"DNA双螺旋结构的发现"）
+formula: 公式/方程（如"E=mc²"、"勾股定理"、"化学平衡常数"）
+theorem: 定理/原理（如"动量守恒定律"、"勒夏特列原理"、"自然选择"）
+method: 方法（如"归纳法"、"实验法"、"比较分析法"）
+time: 时间/时期（如"19世纪"、"唐朝"、"侏罗纪"）
+location: 地点（如"雅典"、"赤道"、"撒哈拉沙漠"）
+organization: 机构（如"中国科学院"、"哈佛大学"）
+work: 著作（如"《物种起源》"、"《史记》"）
+
+-关系类型说明-
+常用关系类型，以中文表示：
+包含: A 包含/包括 B
+因果: A 导致/引起 B
+前提: A 是 B 的基础/前提
+应用: A 应用于 B
+对比: A 与 B 对比/对立
+发展: A 发展为/演变为 B
+例证: A 是 B 的例子
+关联: A 与 B 一般关联
 
 -示例-
 ######################
@@ -29,29 +61,27 @@
 示例1：
 
 文本：
-团队领导张三宣布，公司将在第三季度推出新产品。该产品由研发部门开发，
-预计将在市场上与主要竞争对手李四公司形成直接竞争。张三表示，
-这将是一个重要的里程碑。
+牛顿在1687年发表了《自然哲学的数学原理》，提出了著名的牛顿三大定律。
+其中牛顿第二定律指出，物体的加速度与作用力成正比，与质量成反比，公式为 F=ma。
+这一发现奠定了经典力学的基础，对后来的工业革命产生了深远影响。
 
 ######################
 
 输出：
-(entity{tuple_delimiter}张三{tuple_delimiter}person{tuple_delimiter}团队领导，宣布公司将在第三季度推出新产品，表示这将是一个重要的里程碑){record_delimiter}
-(entity{tuple_delimiter}公司{tuple_delimiter}organization{tuple_delimiter}将在第三季度推出新产品，与研发部门有隶属关系){record_delimiter}
-(entity{tuple_delimiter}新产品{tuple_delimiter}product{tuple_delimiter}由研发部门开发，预计将在第三季度推出，将与李四公司形成竞争){record_delimiter}
-(entity{tuple_delimiter}研发部门{tuple_delimiter}organization{tuple_delimiter}负责开发新产品，隶属于公司){record_delimiter}
-(entity{tuple_delimiter}第三季度{tuple_delimiter}time{tuple_delimiter}新产品推出的时间节点){record_delimiter}
-(entity{tuple_delimiter}李四公司{tuple_delimiter}organization{tuple_delimiter}主要竞争对手，与新公司新产品形成直接竞争){record_delimiter}
-(entity{tuple_delimiter}重要里程碑{tuple_delimiter}event{tuple_delimiter}新产品推出对公司的重要意义){record_delimiter}
+(entity{tuple_delimiter}牛顿{tuple_delimiter}person{tuple_delimiter}英国物理学家，于1687年发表《自然哲学的数学原理》，提出牛顿三大定律，奠定经典力学基础){record_delimiter}
+(entity{tuple_delimiter}《自然哲学的数学原理》{tuple_delimiter}work{tuple_delimiter}牛顿于1687年发表的著作，系统阐述了牛顿三大定律和万有引力定律){record_delimiter}
+(entity{tuple_delimiter}牛顿第二定律{tuple_delimiter}theorem{tuple_delimiter}物体加速度与作用力成正比、与质量成反比的物理定律，公式表达为F=ma){record_delimiter}
+(entity{tuple_delimiter}F=ma{tuple_delimiter}formula{tuple_delimiter}牛顿第二定律的数学表达式，F表示力，m表示质量，a表示加速度){record_delimiter}
+(entity{tuple_delimiter}经典力学{tuple_delimiter}concept{tuple_delimiter}以牛顿三大定律为基础的力学理论体系，描述宏观物体的运动规律){record_delimiter}
+(entity{tuple_delimiter}工业革命{tuple_delimiter}event{tuple_delimiter}18世纪开始的技术变革，经典力学为其提供了理论基础){record_delimiter}
+(entity{tuple_delimiter}1687年{tuple_delimiter}time{tuple_delimiter}牛顿发表《自然哲学的数学原理》的时间){record_delimiter}
 {record_delimiter}
-(relationship{tuple_delimiter}张三{tuple_delimiter}公司{tuple_delimiter}张三是公司的团队领导{tuple_delimiter}9){record_delimiter}
-(relationship{tuple_delimiter}张三{tuple_delimiter}新产品{tuple_delimiter}张三宣布推出新产品{tuple_delimiter}8){record_delimiter}
-(relationship{tuple_delimiter}公司{tuple_delimiter}新产品{tuple_delimiter}公司将推出新产品{tuple_delimiter}9){record_delimiter}
-(relationship{tuple_delimiter}公司{tuple_delimiter}研发部门{tuple_delimiter}研发部门隶属于公司{tuple_delimiter}9){record_delimiter}
-(relationship{tuple_delimiter}研发部门{tuple_delimiter}新产品{tuple_delimiter}研发部门开发新产品{tuple_delimiter}9){record_delimiter}
-(relationship{tuple_delimiter}新产品{tuple_delimiter}第三季度{tuple_delimiter}新产品将在第三季度推出{tuple_delimiter}8){record_delimiter}
-(relationship{tuple_delimiter}新产品{tuple_delimiter}李四公司{tuple_delimiter}新产品将与李四公司形成竞争{tuple_delimiter}7){record_delimiter}
-(relationship{tuple_delimiter}新产品{tuple_delimiter}重要里程碑{tuple_delimiter}新产品推出是重要里程碑{tuple_delimiter}8){record_delimiter}
+(relationship{tuple_delimiter}牛顿{tuple_delimiter}《自然哲学的数学原理》{tuple_delimiter}牛顿是《自然哲学的数学原理》的作者{tuple_delimiter}10){record_delimiter}
+(relationship{tuple_delimiter}牛顿{tuple_delimiter}牛顿第二定律{tuple_delimiter}牛顿提出了牛顿第二定律{tuple_delimiter}10){record_delimiter}
+(relationship{tuple_delimiter}牛顿第二定律{tuple_delimiter}F=ma{tuple_delimiter}F=ma是牛顿第二定律的数学表达式{tuple_delimiter}10){record_delimiter}
+(relationship{tuple_delimiter}牛顿第二定律{tuple_delimiter}经典力学{tuple_delimiter}牛顿第二定律是经典力学的核心内容{tuple_delimiter}9){record_delimiter}
+(relationship{tuple_delimiter}经典力学{tuple_delimiter}工业革命{tuple_delimiter}经典力学为工业革命提供了理论基础{tuple_delimiter}7){record_delimiter}
+(relationship{tuple_delimiter}《自然哲学的数学原理》{tuple_delimiter}经典力学{tuple_delimiter}《自然哲学的数学原理》奠定了经典力学的基础{tuple_delimiter}9){record_delimiter}
 {completion_delimiter}
 
 ######################
@@ -59,33 +89,29 @@
 示例2：
 
 文本：
-在2024年技术大会上，王五教授发表了关于人工智能伦理的演讲。他强调了
-在AI系统开发中考虑道德因素的重要性。演讲引起了与会者的广泛关注，
-特别是来自科技公司的代表们。大会主席赵六表示，这是大会历史上
-最受欢迎的主题演讲之一。
+细胞学说由施莱登和施旺于19世纪30年代提出，是生物学的基石之一。
+该学说指出：所有生物体都由细胞组成，细胞是生命活动的基本单位，
+新细胞由已存在的细胞分裂产生。细胞学说与达尔文的进化论一起，
+构成了现代生物学的两大理论基础。细胞学说的建立也依赖于显微镜技术的进步。
 
 ######################
 
 输出：
-(entity{tuple_delimiter}王五教授{tuple_delimiter}person{tuple_delimiter}在技术大会上发表关于人工智能伦理的演讲，强调考虑道德因素的重要性){record_delimiter}
-(entity{tuple_delimiter}2024年技术大会{tuple_delimiter}event{tuple_delimiter}王五教授发表演讲的场合，赵六担任主席){record_delimiter}
-(entity{tuple_delimiter}人工智能伦理{tuple_delimiter}topic{tuple_delimiter}王五教授演讲的主题，强调道德因素的重要性){record_delimiter}
-(entity{tuple_delimiter}AI系统开发{tuple_delimiter}process{tuple_delimiter}需要考虑道德因素的技术开发过程){record_delimiter}
-(entity{tuple_delimiter}道德因素{tuple_delimiter}concept{tuple_delimiter}在AI系统开发中需要考虑的重要因素){record_delimiter}
-(entity{tuple_delimiter}与会者{tuple_delimiter}person{tuple_delimiter}参加技术大会的人群，广泛关注演讲){record_delimiter}
-(entity{tuple_delimiter}科技公司代表{tuple_delimiter}person{tuple_delimiter}与会者的一部分，特别关注演讲内容){record_delimiter}
-(entity{tuple_delimiter}赵六{tuple_delimiter}person{tuple_delimiter}大会主席，评价演讲为大会历史上最受欢迎的主题演讲之一){record_delimiter}
-(entity{tuple_delimiter}主题演讲{tuple_delimiter}event{tuple_delimiter}大会上的重要演讲环节，这是最受欢迎的之一){record_delimiter}
+(entity{tuple_delimiter}细胞学说{tuple_delimiter}theorem{tuple_delimiter}19世纪30年代由施莱登和施旺提出的生物学基本理论，指出所有生物由细胞组成){record_delimiter}
+(entity{tuple_delimiter}施莱登{tuple_delimiter}person{tuple_delimiter}德国植物学家，与施旺共同提出细胞学说){record_delimiter}
+(entity{tuple_delimiter}施旺{tuple_delimiter}person{tuple_delimiter}德国动物学家，与施莱登共同提出细胞学说){record_delimiter}
+(entity{tuple_delimiter}细胞{tuple_delimiter}concept{tuple_delimiter}生命活动的基本单位，所有生物体的结构和功能基础){record_delimiter}
+(entity{tuple_delimiter}进化论{tuple_delimiter}theorem{tuple_delimiter}达尔文提出的生物进化理论，与细胞学说并列为现代生物学两大理论基石){record_delimiter}
+(entity{tuple_delimiter}达尔文{tuple_delimiter}person{tuple_delimiter}英国生物学家，进化论的创立者){record_delimiter}
+(entity{tuple_delimiter}显微镜技术{tuple_delimiter}method{tuple_delimiter}观察微观结构的技术手段，细胞学说的建立依赖其进步){record_delimiter}
+(entity{tuple_delimiter}19世纪30年代{tuple_delimiter}time{tuple_delimiter}细胞学说提出的时间){record_delimiter}
 {record_delimiter}
-(relationship{tuple_delimiter}王五教授{tuple_delimiter}2024年技术大会{tuple_delimiter}王五教授在技术大会上发表演讲{tuple_delimiter}9){record_delimiter}
-(relationship{tuple_delimiter}王五教授{tuple_delimiter}人工智能伦理{tuple_delimiter}王五教授演讲的主题是人工智能伦理{tuple_delimiter}10){record_delimiter}
-(relationship{tuple_delimiter}王五教授{tuple_delimiter}AI系统开发{tuple_delimiter}王五教授讨论AI系统开发中的道德问题{tuple_delimiter}8){record_delimiter}
-(relationship{tuple_delimiter}人工智能伦理{tuple_delimiter}道德因素{tuple_delimiter}人工智能伦理强调道德因素的重要性{tuple_delimiter}9){record_delimiter}
-(relationship{tuple_delimiter}AI系统开发{tuple_delimiter}道德因素{tuple_delimiter}AI系统开发需要考虑道德因素{tuple_delimiter}9){record_delimiter}
-(relationship{tuple_delimiter}与会者{tuple_delimiter}王五教授的演讲{tuple_delimiter}与会者广泛关注演讲{tuple_delimiter}7){record_delimiter}
-(relationship{tuple_delimiter}科技公司代表{tuple_delimiter}与会者{tuple_delimiter}科技公司代表是与会者的一部分{tuple_delimiter}8){record_delimiter}
-(relationship{tuple_delimiter}赵六{tuple_delimiter}2024年技术大会{tuple_delimiter}赵六是大会主席{tuple_delimiter}9){record_delimiter}
-(relationship{tuple_delimiter}赵六{tuple_delimiter}主题演讲{tuple_delimiter}赵六评价主题演讲为最受欢迎的之一{tuple_delimiter}8){record_delimiter}
+(relationship{tuple_delimiter}施莱登{tuple_delimiter}细胞学说{tuple_delimiter}施莱登与施旺共同提出细胞学说{tuple_delimiter}10){record_delimiter}
+(relationship{tuple_delimiter}施旺{tuple_delimiter}细胞学说{tuple_delimiter}施旺与施莱登共同提出细胞学说{tuple_delimiter}10){record_delimiter}
+(relationship{tuple_delimiter}细胞学说{tuple_delimiter}细胞{tuple_delimiter}细胞学说指出细胞是生命活动的基本单位{tuple_delimiter}10){record_delimiter}
+(relationship{tuple_delimiter}细胞学说{tuple_delimiter}显微镜技术{tuple_delimiter}细胞学说的建立依赖于显微镜技术{tuple_delimiter}8){record_delimiter}
+(relationship{tuple_delimiter}细胞学说{tuple_delimiter}进化论{tuple_delimiter}细胞学说与进化论并列为现代生物学两大理论基础{tuple_delimiter}8){record_delimiter}
+(relationship{tuple_delimiter}达尔文{tuple_delimiter}进化论{tuple_delimiter}达尔文创立了进化论{tuple_delimiter}10){record_delimiter}
 {completion_delimiter}
 
 ######################

@@ -1,17 +1,27 @@
 
-You are an expert in community network analysis. You are skilled at identifying relational patterns and structural properties within complex networks. You are adept at helping people understand the dynamics and organization of communities of interest, particularly in domains like algorithmic analysis. Your expertise lies in uncovering insights from data to reveal hidden connections and hierarchies.
-Using your expertise, you're asked to generate a comprehensive summary of the data provided below.
-Given one or two entities, and a list of descriptions, all related to the same entity or group of entities.
-Please concatenate all of these into a single, concise description in Chinese. Make sure to include information collected from all the descriptions.
-If the provided descriptions are contradictory, please resolve the contradictions and provide a single, coherent summary.
-Make sure it is written in third person, and include the entity names so we have the full context.
+你是一位教学知识综合专家。你擅长将多个来源的实体描述综合为简洁、准确、连贯的中文摘要。
 
-Enrich it as much as you can with relevant information from the nearby text, this is very important.
+# 目标
+给定一个或两个教学实体，以及一组与该实体相关的描述列表，将所有描述整合为一段简洁的中文综合描述。确保包含所有描述中的关键信息。
 
-If no answer is possible, or the description is empty, only convey information that is provided within the text.
+如果提供的描述之间存在矛盾，请解决矛盾并提供一致、连贯的摘要。
+确保使用第三人称，并包含实体名称以便读者获得完整上下文。
+
+尽可能从相关文本中丰富描述内容，这非常重要。
+
+如果无法回答，或者描述为空，则只传递文本中提供的信息。
+
+# 输出要求
+- 使用中文
+- 200-500 字
+- 包含实体名称
+- 整合所有描述的关键信息
+- 第三人称叙述
+- 适合教学场景的表达风格
+
 #######
--Data-
-Entities: {entity_name}
-Description List: {description_list}
+-数据-
+实体: {entity_name}
+描述列表: {description_list}
 #######
-Output:
+输出：

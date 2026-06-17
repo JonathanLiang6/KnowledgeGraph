@@ -121,6 +121,10 @@ async def _process_document(doc_id: str, filepath: str, task_id: str):
             hybrid.index_document(chunk_dicts, embeddings)
 
             # ---- 完成 ----
+            import json
+            # 保存图谱数据供 graph 端点使用
+            final_graph = refined_graph if 'refined_graph' in dir() else result_graph
+            doc.graph_data = json.dumps(final_graph, ensure_ascii=False)
             doc.status = DocumentStatus.DONE
             doc.progress = 100.0
             doc.processed_at = datetime.now()
@@ -154,8 +158,8 @@ async def _process_document(doc_id: str, filepath: str, task_id: str):
                     doc.status = DocumentStatus.FAILED
                     doc.error_message = str(e)
                     await db.flush()
-            except Exception:
-                pass
+            except Exception as status_error:
+                logger.error(f"更新文档失败状态时出错: {status_error}")
 
 
 async def _update_doc_status(

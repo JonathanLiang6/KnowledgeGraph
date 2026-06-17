@@ -5,7 +5,7 @@ import json
 import time
 import uuid
 import logging
-from typing import Optional, List
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession

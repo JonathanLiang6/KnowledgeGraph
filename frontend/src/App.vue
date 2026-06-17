@@ -3,5 +3,5 @@
 </template>
 
 <script setup>
-// App.vue simplified - layout is now managed by AdminLayout.vue
+// 根组件 — 路由分发（首页 / 知识库详情）
 </script>

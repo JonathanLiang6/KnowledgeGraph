@@ -3,15 +3,16 @@
     <div class="page-header">
       <h1 class="page-title">文档管理</h1>
       <div class="header-actions">
-        <el-upload
-          :before-upload="handleUpload"
-          :show-file-list="false"
+        <input
+          ref="fileInput"
+          type="file"
           accept=".txt,.md,.pdf,.docx"
-        >
-          <button class="btn-primary">
-            <el-icon :size="14"><Upload /></el-icon> 上传文档
-          </button>
-        </el-upload>
+          style="display:none"
+          @change="onFileSelected"
+        />
+        <button class="btn-primary" @click="$refs.fileInput.click()">
+          <el-icon :size="14"><Upload /></el-icon> 上传文档
+        </button>
       </div>
     </div>
 
@@ -27,7 +28,7 @@
     </div>
 
     <!-- 文档表格 -->
-    <el-table :data="filteredDocs" style="width: 100%" v-loading="loading" empty-text="暂无文档">
+    <el-table :data="filteredDocs" style="width: 100%" v-loading="loading" empty-text="暂无文档，请先上传">
       <el-table-column prop="filename" label="文件名" min-width="200">
         <template #default="{ row }">
           <span class="file-name">{{ row.filename }}</span>
@@ -42,7 +43,7 @@
           <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="实体/关系" width="120">
+      <el-table-column label="实体 / 关系" width="120">
         <template #default="{ row }">
           {{ row.entity_count }} / {{ row.relationship_count }}
         </template>
@@ -65,13 +66,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { getDocuments, uploadDocument, deleteDocument } from '../api/document'
-import { useAppStore } from '../stores/app'
 import { Upload, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-const appStore = useAppStore()
+const route = useRoute()
+const fileInput = ref(null)
 const docs = ref([])
 const loading = ref(false)
 const filterStatus = ref('')
@@ -84,50 +86,118 @@ const filteredDocs = computed(() => {
   return docs.value.filter(d => d.filename.includes(searchQuery.value))
 })
 
-function formatSize(b) { if (!b) return '0 B'; return b < 1024 ? `${b} B` : b < 1048576 ? `${(b/1024).toFixed(1)} KB` : `${(b/1048576).toFixed(1)} MB` }
-function formatDate(d) { return d ? new Date(d).toLocaleString('zh-CN') : '' }
+function formatSize(b) {
+  if (!b) return '0 B'
+  if (b < 1024) return `${b} B`
+  if (b < 1048576) return `${(b / 1024).toFixed(1)} KB`
+  return `${(b / 1048576).toFixed(1)} MB`
+}
 
-function statusType(s) { return s === 'done' ? 'success' : s === 'failed' ? 'danger' : 'warning' }
+function formatDate(d) {
+  return d ? new Date(d).toLocaleString('zh-CN') : ''
+}
+
+function statusType(s) {
+  return s === 'done' ? 'success' : s === 'failed' ? 'danger' : 'warning'
+}
+
 function statusLabel(s) {
-  const m = { pending:'等待处理', parsing:'解析中', nlp_extracting:'NLP提取中', llm_refining:'LLM精炼中', chunking:'分块中', embedding:'向量化中', indexing:'索引中', done:'已完成', failed:'失败' }
-  return m[s] || s
+  const map = {
+    pending: '等待处理', parsing: '解析中',
+    nlp_extracting: 'NLP 提取中', llm_refining: 'LLM 精炼中',
+    chunking: '分块中', embedding: '向量化中', indexing: '索引中',
+    done: '已完成', failed: '失败',
+  }
+  return map[s] || s
 }
 
 async function loadDocs() {
   loading.value = true
   try {
-    const p = { page: page.value, page_size: 20 }
-    if (appStore.currentKB?.id) p.kb_id = appStore.currentKB.id
-    if (filterStatus.value) p.status = filterStatus.value
-    const res = await getDocuments(p)
+    const kbId = route.params.id
+    const params = { page: page.value, page_size: 20, kb_id: kbId }
+    if (filterStatus.value) params.status = filterStatus.value
+    const res = await getDocuments(params)
     docs.value = res.items || []
     total.value = res.total || 0
-  } catch {}
-  loading.value = false
+  } catch (e) {
+    console.error('加载文档列表失败:', e)
+    ElMessage.error('加载文档列表失败')
+  } finally {
+    loading.value = false
+  }
 }
 
-async function handleUpload(file) {
+// 原生文件上传 — axios + FormData（拦截器自动处理 Content-Type）
+async function onFileSelected(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+
+  const kbId = route.params.id
+  if (!kbId) {
+    ElMessage.warning('知识库 ID 无效')
+    resetFileInput()
+    return
+  }
+
   const fd = new FormData()
   fd.append('file', file)
-  fd.append('kb_id', appStore.currentKB?.id || '')
-  try { const res = await uploadDocument(fd); ElMessage.success(`[${res.filename}] 已上传`); await loadDocs() }
-  catch (e) { ElMessage.error(e.message) }
-  return false
+  fd.append('kb_id', kbId)
+
+  try {
+    const res = await uploadDocument(fd)
+    ElMessage.success(`「${res.filename}」已上传，正在处理中`)
+    await loadDocs()
+  } catch (e) {
+    ElMessage.error(e.message || '上传失败')
+  } finally {
+    resetFileInput()
+  }
+}
+
+function resetFileInput() {
+  if (fileInput.value) fileInput.value.value = ''
 }
 
 async function deleteDoc(doc) {
-  try { await ElMessageBox.confirm(`删除 [${doc.filename}]？`, '确认删除', { type: 'warning' }); await deleteDocument(doc.id); ElMessage.success('已删除'); await loadDocs() }
-  catch {}
+  try {
+    await ElMessageBox.confirm(`确定要删除「${doc.filename}」吗？`, '确认删除', { type: 'warning' })
+    await deleteDocument(doc.id)
+    ElMessage.success('已删除')
+    await loadDocs()
+  } catch (e) {
+    if (e !== 'cancel' && e?.message !== 'cancel') {
+      console.error('删除文档失败:', e)
+    }
+  }
 }
+
+watch(() => route.params.id, () => {
+  page.value = 1
+  loadDocs()
+})
 
 onMounted(loadDocs)
 </script>
 
 <style scoped lang="scss">
 .documents-page {
-  .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-md); }
-  .filter-bar { display: flex; gap: var(--spacing-sm); margin-bottom: var(--spacing-md); }
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-md);
+  }
+  .filter-bar {
+    display: flex;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+  }
   .file-name { font-weight: 500; }
-  .pagination-bar { display: flex; justify-content: center; margin-top: var(--spacing-md); }
+  .pagination-bar {
+    display: flex;
+    justify-content: center;
+    margin-top: var(--spacing-md);
+  }
 }
 </style>

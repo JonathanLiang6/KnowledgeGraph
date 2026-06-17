@@ -19,7 +19,7 @@ from app.schemas.document import (
     DocumentStats,
 )
 from app.utils.file_parser import read_file_content, get_file_info
-from app.utils.helpers import format_file_size, ensure_dir
+from app.utils.helpers import format_file_size, ensure_dir, sanitize_filename
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["文档管理"])
@@ -71,17 +71,13 @@ async def upload_document(
     if not kb_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="知识库不存在")
 
-    # 保存文件
+    # 保存文件（使用 UUID 避免文件名冲突和 TOCTOU 竞态）
     ensure_dir(config.LOCAL_DATA_DIR)
-    safe_filename = file.filename or "untitled"
-    stored_path = os.path.join(config.LOCAL_DATA_DIR, safe_filename)
-
-    # 避免文件名冲突
-    base, ext = os.path.splitext(safe_filename)
-    counter = 1
-    while os.path.exists(stored_path):
-        stored_path = os.path.join(config.LOCAL_DATA_DIR, f"{base}_{counter}{ext}")
-        counter += 1
+    raw_filename = file.filename or "untitled"
+    safe_filename = sanitize_filename(raw_filename)
+    file_uuid = str(uuid.uuid4())
+    stored_name = f"{file_uuid}_{safe_filename}"
+    stored_path = os.path.join(config.LOCAL_DATA_DIR, stored_name)
 
     content = await file.read()
     with open(stored_path, "wb") as f:
@@ -93,7 +89,7 @@ async def upload_document(
     # 创建文档记录
     doc = Document(
         kb_id=kb_id,
-        filename=safe_filename,
+        filename=raw_filename,
         file_path=stored_path,
         file_type=file_info["type"],
         file_size=file_info["size"],
@@ -103,18 +99,16 @@ async def upload_document(
     await db.flush()
     await db.refresh(doc)
 
-    # 生成任务 ID
-    task_id = str(uuid.uuid4())
-
-    # 触发异步处理（Phase 5 实现完整任务系统，这里先占位）
-    # await start_document_processing(doc.id, task_id, stored_path)
+    # 触发异步处理
+    from app.tasks.document_tasks import start_document_processing
+    task_id = await start_document_processing(doc.id, stored_path)
 
     return DocumentUploadResponse(
         document_id=doc.id,
         task_id=task_id,
-        filename=safe_filename,
-        status="pending",
-        message="文档已上传，等待处理",
+        filename=raw_filename,
+        status="processing",
+        message="文档已上传，正在处理",
     )
 
 

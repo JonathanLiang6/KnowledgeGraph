@@ -7,8 +7,8 @@
           <div class="welcome-icon">
             <el-icon :size="48" color="var(--color-primary)"><ChatDotRound /></el-icon>
           </div>
-          <h2>Chat Studio</h2>
-          <p>选择搜索模式，开始智能问答</p>
+          <h2>智能问答</h2>
+          <p>选择搜索模式，基于知识库内容进行智能问答</p>
         </div>
 
         <div v-for="(msg, idx) in messages" :key="idx" :class="['message', msg.role]">
@@ -18,11 +18,12 @@
           </div>
           <div class="message-content">
             <div class="message-text" v-html="renderMarkdown(msg.content)" />
+            <div v-if="msg.error" class="message-error">{{ msg.error }}</div>
             <div class="message-time">{{ formatTime(msg.timestamp) }}</div>
           </div>
         </div>
 
-        <!-- 流式输出中的光标 -->
+        <!-- 流式输出光标 -->
         <span v-if="isStreaming" class="cursor-blink" />
       </div>
 
@@ -40,7 +41,7 @@
             v-model="inputText"
             type="textarea"
             :rows="2"
-            placeholder="输入你的问题..."
+            placeholder="输入你的问题，按 Enter 发送..."
             @keydown.enter.exact.prevent="sendMessage"
             :disabled="isStreaming"
           />
@@ -55,12 +56,13 @@
 
 <script setup>
 import { ref, nextTick, onMounted } from 'vue'
-import { useAppStore } from '../stores/app'
+import { useRoute } from 'vue-router'
 import { chatCompletionsStream } from '../api/chat'
 import { ChatDotRound, Cpu, User, Promotion } from '@element-plus/icons-vue'
 import { marked } from 'marked'
+import { ElMessage } from 'element-plus'
 
-const appStore = useAppStore()
+const route = useRoute()
 const messages = ref([])
 const inputText = ref('')
 const isStreaming = ref(false)
@@ -95,15 +97,16 @@ async function sendMessage() {
   messages.value.push(assistantMsg)
   isStreaming.value = true
 
+  // 只发送已完成的消息（排除当前空的 assistant 占位）
   const chatMessages = messages.value
-    .filter(m => m.role !== 'system')
-    .map(m => ({ role: m.role, content: m.content.replace(assistantMsg.content, '') || m.content }))
+    .filter(m => m.role !== 'system' && m !== assistantMsg)
+    .map(m => ({ role: m.role, content: m.content }))
 
   chatCompletionsStream(
     {
       model: searchMode.value,
       messages: chatMessages,
-      kb_id: appStore.currentKB?.id || null,
+      kb_id: route.params.id || null,
     },
     (chunk) => {
       assistantMsg.content += chunk
@@ -115,8 +118,9 @@ async function sendMessage() {
       scrollToBottom()
     },
     (err) => {
-      assistantMsg.content += `\n\n[错误: ${err.message}]`
+      assistantMsg.error = `请求失败: ${err.message}`
       isStreaming.value = false
+      ElMessage.error(`问答请求失败: ${err.message}`)
     }
   )
 }
@@ -125,13 +129,15 @@ onMounted(() => {
   try {
     const saved = localStorage.getItem('chatMessages_v2')
     if (saved) messages.value = JSON.parse(saved)
-  } catch {}
+  } catch (e) {
+    console.warn('无法恢复聊天记录:', e)
+  }
 })
 </script>
 
 <style scoped lang="scss">
 .chat-studio {
-  height: calc(100vh - var(--topbar-height) - var(--spacing-lg) * 2);
+  height: calc(100vh - 56px - 44px - var(--spacing-lg) * 2);
   display: flex;
 }
 
@@ -153,6 +159,7 @@ onMounted(() => {
 .welcome {
   text-align: center;
   padding: 60px 20px;
+
   .welcome-icon { margin-bottom: var(--spacing-md); }
   h2 { font-size: 24px; margin-bottom: var(--spacing-sm); }
   p { color: var(--text-secondary); }
@@ -167,10 +174,19 @@ onMounted(() => {
     background: var(--color-primary-gradient);
     color: #fff;
   }
+
   &.user {
     flex-direction: row-reverse;
-    .message-avatar { background: var(--bg-page); color: var(--color-primary); }
-    .message-content { background: var(--color-primary-gradient); color: #fff; }
+
+    .message-avatar {
+      background: var(--bg-page);
+      color: var(--color-primary);
+    }
+
+    .message-content {
+      background: var(--color-primary-gradient);
+      color: #fff;
+    }
   }
 }
 
@@ -194,9 +210,24 @@ onMounted(() => {
   .message-text {
     font-size: 14px;
     line-height: 1.7;
+
     :deep(p) { margin-bottom: 8px; }
-    :deep(pre) { background: #f8f9fc; padding: 12px; border-radius: var(--radius-sm); overflow-x: auto; }
-    :deep(code) { font-family: 'Fira Code', monospace; font-size: 13px; }
+    :deep(pre) {
+      background: #f8f9fc;
+      padding: 12px;
+      border-radius: var(--radius-sm);
+      overflow-x: auto;
+    }
+    :deep(code) {
+      font-family: 'Fira Code', monospace;
+      font-size: 13px;
+    }
+  }
+
+  .message-error {
+    color: var(--color-danger);
+    font-size: 12px;
+    margin-top: 4px;
   }
 
   .message-time {

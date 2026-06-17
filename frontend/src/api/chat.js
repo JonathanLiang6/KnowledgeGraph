@@ -9,18 +9,21 @@ export function chatCompletions(data) {
   return api.post('/chat/completions', data)
 }
 
-// 流式聊天 (SSE) - 使用 fetch 直接调用
+// 流式聊天 (SSE) - 使用相对路径通过 Vite 代理
 export function chatCompletionsStream(data, onChunk, onDone, onError) {
   const controller = new AbortController()
 
-  fetch('http://localhost:8013/api/v1/chat/completions', {
+  fetch('/api/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...data, stream: true }),
     signal: controller.signal,
   })
     .then(async (response) => {
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '')
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
+      }
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
 
@@ -42,14 +45,22 @@ export function chatCompletionsStream(data, onChunk, onDone, onError) {
               const json = JSON.parse(data)
               const content = json.choices?.[0]?.delta?.content
               if (content) onChunk?.(content)
-            } catch {}
+            } catch (e) {
+              // 非 JSON 行（如注释），跳过
+              if (data.trim() && !data.startsWith(':')) {
+                console.warn('[SSE] 无法解析数据块:', data.substring(0, 100))
+              }
+            }
           }
         }
       }
       onDone?.()
     })
     .catch((err) => {
-      if (err.name !== 'AbortError') onError?.(err)
+      if (err.name !== 'AbortError') {
+        console.error('[SSE] 流式请求失败:', err)
+        onError?.(err)
+      }
     })
 
   return controller

@@ -57,6 +57,9 @@ class Document(Base):
     # 错误信息
     error_message: Mapped[str] = mapped_column(Text, default="", comment="错误信息")
 
+    # 图谱数据 (JSON 字符串，提取完成时写入)
+    graph_data: Mapped[str] = mapped_column(Text, nullable=True, default=None, comment="提取的图谱数据JSON")
+
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), comment="上传时间"

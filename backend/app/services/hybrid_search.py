@@ -192,8 +192,8 @@ class HybridSearchService:
             existing = self.vector_store._table.to_list() if self.vector_store._table else []
             for record in existing:
                 all_chunks.append((record["id"], record["text"]))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"读取已有向量索引时出错（将重建索引）: {e}")
         for chunk in chunks:
             all_chunks.append((chunk["id"], chunk["text"]))
         self.bm25_index.index(all_chunks)

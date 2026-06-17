@@ -74,22 +74,38 @@ class EmbeddingService:
 
     @classmethod
     def _deepseek_encode(cls, texts: List[str]) -> List[List[float]]:
-        """回退方案：使用 DeepSeek API"""
+        """回退方案：使用 DeepSeek API（线程安全，避免事件循环冲突）"""
         import asyncio
+        import threading
         from app.services.deepseek_client import DeepSeekClient
 
+        async def _run():
+            return await DeepSeekClient.embed(texts)
+
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # 在异步上下文中，创建新的事件循环
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(
-                        asyncio.run, DeepSeekClient.embed(texts)
-                    )
-                    return future.result(timeout=60)
-            else:
-                return loop.run_until_complete(DeepSeekClient.embed(texts))
+            result_holder = []
+            error_holder = []
+
+            def _run_in_thread():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    result_holder.append(loop.run_until_complete(_run()))
+                except Exception as e:
+                    error_holder.append(e)
+                finally:
+                    loop.close()
+
+            thread = threading.Thread(target=_run_in_thread, daemon=True)
+            thread.start()
+            thread.join(timeout=60)
+
+            if error_holder:
+                raise error_holder[0]
+            if result_holder:
+                return result_holder[0]
+            raise RuntimeError("DeepSeek Embedding 超时或返回空结果")
+
         except Exception as e:
             logger.error(f"DeepSeek Embedding 失败: {e}")
             # 最终回退：返回零向量
@@ -99,8 +115,7 @@ class EmbeddingService:
             return [np.zeros(dim).tolist() for _ in texts]
 
     @classmethod
-    @property
-    def dimension(cls) -> int:
+    def get_dimension(cls) -> int:
         """获取向量维度"""
         model = _get_local_model()
         if model is not None:

@@ -58,12 +58,12 @@ class Config:
     COMMUNITY_LEVEL: int = int(os.getenv("COMMUNITY_LEVEL", "2"))
 
     # ========================
-    # 分块参数
+    # 分块参数（优化：更小块 = 更快嵌入）
     # ========================
     CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "800"))
-    CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "100"))
-    PARENT_CHUNK_SIZE: int = int(os.getenv("PARENT_CHUNK_SIZE", "1200"))
-    CHILD_CHUNK_SIZE: int = int(os.getenv("CHILD_CHUNK_SIZE", "300"))
+    CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "50"))
+    PARENT_CHUNK_SIZE: int = int(os.getenv("PARENT_CHUNK_SIZE", "800"))
+    CHILD_CHUNK_SIZE: int = int(os.getenv("CHILD_CHUNK_SIZE", "200"))
 
     # ========================
     # 提示词文件路径
@@ -95,15 +95,15 @@ class Config:
     # ========================
     HYBRID_SEARCH_TOP_K: int = int(os.getenv("HYBRID_SEARCH_TOP_K", "20"))
     RERANK_TOP_K: int = int(os.getenv("RERANK_TOP_K", "5"))
-    BM25_WEIGHT: float = float(os.getenv("BM25_WEIGHT", "0.3"))  # BM25 在混合检索中的权重
-    VECTOR_WEIGHT: float = float(os.getenv("VECTOR_WEIGHT", "0.7"))  # 向量检索权重
+    BM25_WEIGHT: float = float(os.getenv("BM25_WEIGHT", "0.3"))
+    VECTOR_WEIGHT: float = float(os.getenv("VECTOR_WEIGHT", "0.7"))
 
     # ========================
-    # 知识图谱配置
+    # 知识图谱配置（优化：减少实体数加速处理）
     # ========================
     ENTITY_WEIGHT_THRESHOLD: float = float(os.getenv("ENTITY_WEIGHT_THRESHOLD", "0.02"))
-    MAX_ENTITIES: int = int(os.getenv("MAX_ENTITIES", "60"))
-    MAX_RELATIONSHIPS: int = int(os.getenv("MAX_RELATIONSHIPS", "80"))
+    MAX_ENTITIES: int = int(os.getenv("MAX_ENTITIES", "30"))
+    MAX_RELATIONSHIPS: int = int(os.getenv("MAX_RELATIONSHIPS", "40"))
 
     @property
     def is_api_key_set(self) -> bool:

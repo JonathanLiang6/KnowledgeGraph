@@ -175,8 +175,8 @@ def read_file_stream(filepath: str, chunk_size: int = 64 * 1024) -> Generator[by
 
 
 def generate_id(text: str, prefix: str = "") -> str:
-    """基于文本生成 MD5 唯一 ID"""
-    hash_obj = hashlib.md5(text.encode("utf-8"))
+    """基于文本生成 SHA256 唯一 ID (v2.4: SHA256 替代 MD5)"""
+    hash_obj = hashlib.sha256(text.encode("utf-8"))
     raw_id = hash_obj.hexdigest()[:12]
     return f"{prefix}_{raw_id}" if prefix else raw_id
 
@@ -247,8 +247,8 @@ def remove_duplicates_preserve_order(items: list) -> list:
 
 
 def extract_keywords(text: str, min_length: int = 2) -> list:
-    """简单关键词提取"""
-    words = re.findall(r"[一-龥a-zA-Z]+", text)
+    """简单关键词提取 (v2.4: 扩展CJK范围)"""
+    words = re.findall(r"[一-鿿㐀-䶿豈-﫿a-zA-Z]+", text)
     return [w for w in words if len(w) >= min_length]
 
 
@@ -310,11 +310,13 @@ def format_file_size(size_bytes: int) -> str:
 
 
 def count_tokens_approximate(text: str) -> int:
-    """估算 token 数量（英文单词 + 中文字符）"""
-    chinese_chars = len(re.findall(r"[一-龥]", text))
+    """估算 token 数量 (v2.4: 扩展CJK + 非空白字符兜底)"""
+    chinese_chars = len(re.findall(r"[一-鿿㐀-䶿豈-﫿]", text))
     english_words = len(re.findall(r"[a-zA-Z]+", text))
-    # 中文字符 ≈ 1 token，英文单词 ≈ 1.3 token
-    return chinese_chars + int(english_words * 1.3)
+    # 剩余非空白字符（数字、标点等）
+    other_chars = len(re.findall(r"[^\s]", text)) - chinese_chars - english_words * 3
+    # 中文字符 ≈ 1 token, 英文单词 ≈ 1.3 token, 其他 ≈ 0.25 token/char
+    return chinese_chars + int(english_words * 1.3) + max(0, int(other_chars * 0.25))
 
 
 def mask_sensitive_info(text: str, mask: str = "****") -> str:

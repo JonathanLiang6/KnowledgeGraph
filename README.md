@@ -1,14 +1,15 @@
 # 知识图谱智能问答系统
 
-一个基于 GraphRAG 和智谱AI 的知识图谱智能问答系统，支持文档管理、知识图谱可视化和智能问答功能。
+基于 DeepSeek V4 + GraphRAG + Hybrid RAG 的企业级知识图谱问答系统，支持文档管理、知识图谱可视化和智能问答功能。
+
+> **当前版本: v2.4** | [变更日志](CODE_REVIEW.md) | [架构设计](PROJECT_SUMMARY.md)
 
 ## ✨ 功能特性
 
 ### 1. 智能问答
-- 支持三种搜索模式：本地搜索、全局搜索、综合搜索
-- 基于知识图谱的精准问答
-- 支持 Markdown 格式回答
-- 对话历史记录和导出功能
+- 支持三种搜索模式：直接问答、RAG本地检索、RAG混合检索
+- 基于知识图谱（GraphRAG）的精准问答增强
+- 支持 SSE 流式输出和 Markdown 格式回答
 
 ### 2. 图谱可视化
 - 交互式知识图谱展示
@@ -33,11 +34,12 @@
 | 技术 | 说明 |
 |------|------|
 | FastAPI | 高性能 Web 框架 |
-| GraphRAG | 微软知识图谱框架 |
+| SQLAlchemy 2.0 | 异步 ORM |
+| DeepSeek V4 | 大语言模型 API |
+| BGE (BAAI) | 本地 Embedding + Reranker |
 | LanceDB | 向量数据库 |
-| 智谱AI | 大语言模型 API |
-| Pandas | 数据处理 |
-| jieba/NLTK/spaCy | NLP 处理 |
+| GraphRAG | 知识图谱增强检索 |
+| jieba/spaCy | NLP 实体提取 |
 
 ### 前端
 | 技术 | 说明 |

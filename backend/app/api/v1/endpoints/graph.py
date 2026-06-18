@@ -39,7 +39,7 @@ async def get_graph_data(
     for doc in docs:
         if doc.graph_data:
             try:
-                stored = json.loads(doc.graph_data) if isinstance(doc.graph_data, str) else doc.graph_data
+                stored = doc.graph_data  # v2.4: JSON 列自动反序列化
                 for node in stored.get("nodes", []):
                     nid = node.get("id", "")
                     if nid and nid not in nodes_map:
@@ -113,8 +113,9 @@ async def get_entity_detail(
 
     for doc in docs:
         try:
-            stored = json.loads(doc.graph_data) if isinstance(doc.graph_data, str) else doc.graph_data
-            for node in stored.get("nodes", []):
+            stored = doc.graph_data  # v2.4: JSON 列自动反序列化
+            if not stored:
+                continue
                 nid = node.get("id", "")
                 if nid and nid not in all_nodes:
                     all_nodes[nid] = node

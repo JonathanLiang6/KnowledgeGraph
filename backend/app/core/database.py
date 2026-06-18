@@ -5,6 +5,7 @@ v2.1: 连接池配置、Alembic 迁移支持
 import os
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import StaticPool
 from app.core.config import config
 
 
@@ -20,8 +21,8 @@ if _is_sqlite:
         config.DATABASE_URL,
         echo=False,
         future=True,
-        # SQLite 单连接模式（避免写锁冲突）
         connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
 else:
     # PostgreSQL/MySQL 连接池配置
@@ -52,6 +53,8 @@ async def get_db() -> AsyncSession:
     """
     FastAPI 依赖注入: 获取数据库 session。
     每个请求一个事务，请求成功自动 commit，异常自动 rollback。
+
+    v2.4: 移除冗余 session.close() — async with 已处理清理。
     """
     async with async_session_factory() as session:
         try:
@@ -60,17 +63,19 @@ async def get_db() -> AsyncSession:
         except Exception:
             await session.rollback()
             raise
-        finally:
-            await session.close()
 
 
 async def init_db():
     """
-    初始化数据库 - 创建所有表。
-    生产环境建议使用 Alembic 迁移。
+    初始化数据库 - 创建所有表并启用 SQLite WAL 模式。
+    v2.4: WAL 模式提升 SQLite 并发读写性能。
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if _is_sqlite:
+            await conn.run_sync(
+                lambda sync_conn: sync_conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+            )
 
 
 async def close_db():

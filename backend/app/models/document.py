@@ -5,7 +5,7 @@ import uuid
 import enum
 from typing import Optional
 from datetime import datetime
-from sqlalchemy import String, Text, Integer, Float, DateTime, Enum, ForeignKey, func
+from sqlalchemy import String, Text, Integer, Float, DateTime, Enum, ForeignKey, func, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
@@ -33,7 +33,7 @@ class Document(Base):
     )
     kb_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("knowledge_bases.id", ondelete="CASCADE"),
-        nullable=False, comment="所属知识库ID"
+        nullable=False, index=True, comment="所属知识库ID"
     )
 
     # 文件信息
@@ -47,7 +47,7 @@ class Document(Base):
 
     # 处理状态
     status: Mapped[DocumentStatus] = mapped_column(
-        Enum(DocumentStatus), default=DocumentStatus.PENDING, comment="处理状态"
+        Enum(DocumentStatus), default=DocumentStatus.PENDING, index=True, comment="处理状态"
     )
     progress: Mapped[float] = mapped_column(Float, default=0.0, comment="处理进度 0-100")
 
@@ -59,10 +59,10 @@ class Document(Base):
     relationship_count: Mapped[int] = mapped_column(Integer, default=0, comment="提取关系数")
 
     # 错误信息
-    error_message: Mapped[str] = mapped_column(Text, default="", comment="错误信息")
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None, comment="错误信息")
 
-    # 图谱数据 (JSON 字符串，提取完成时写入)
-    graph_data: Mapped[str] = mapped_column(Text, nullable=True, default=None, comment="提取的图谱数据JSON")
+    # 图谱数据 (v2.4: JSON 类型替代 Text, 自动序列化)
+    graph_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=None, comment="提取的图谱数据JSON")
 
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(

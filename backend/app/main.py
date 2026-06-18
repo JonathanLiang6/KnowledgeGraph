@@ -31,12 +31,13 @@ async def lifespan(app: FastAPI):
     logger.info(f"   Max File Size: {config.MAX_FILE_SIZE_MB}MB")
     logger.info(f"   Max Concurrent Processing: {config.MAX_CONCURRENT_DOCUMENT_PROCESSING}")
 
-    # 初始化数据库
+    # 初始化数据库 (v2.4: 失败时阻止启动)
     try:
         await init_db()
         logger.info("✅ 数据库初始化完成")
     except Exception as e:
-        logger.error(f"❌ 数据库初始化失败: {e}")
+        logger.critical(f"❌ 数据库初始化失败, 应用无法启动: {e}")
+        raise RuntimeError(f"数据库初始化失败: {e}") from e
 
     # P2: 从 LanceDB 恢复检索索引
     try:
@@ -73,7 +74,7 @@ async def lifespan(app: FastAPI):
 
 async def _delayed_resume():
     """延迟恢复中断的文档处理任务（等待 Embedding 模型等加载完成）"""
-    await asyncio.sleep(3)  # 等待其他服务初始化
+    await asyncio.sleep(2)  # v2.4: 缩短等待时间
     try:
         from app.tasks.document_tasks import resume_pending_documents
         await resume_pending_documents()
@@ -85,7 +86,7 @@ async def _delayed_resume():
 app = FastAPI(
     title="KnowledgeGraph - 教学知识图谱管理后台",
     description="基于 DeepSeek V4 + GraphRAG 的企业级知识图谱问答系统 v2.1",
-    version="2.1.0",
+    version="2.4.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -116,7 +117,7 @@ async def health_check():
     from app.tasks.document_tasks import _active_processing_count
     return {
         "status": "healthy",
-        "version": "2.1.0",
+        "version": "2.4.0",
         "api_configured": config.is_api_key_set,
         "active_processing": _active_processing_count,
         "max_file_size_mb": config.MAX_FILE_SIZE_MB,
@@ -130,7 +131,7 @@ async def health_check():
 async def legacy_overview():
     """旧版概览接口 - 兼容过渡（后续移除）"""
     return {
-        "system": "KnowledgeGraph v2.1.0",
+        "system": "KnowledgeGraph v2.4.0",
         "status": "running",
         "message": "请使用 /api/v1/settings 获取系统信息",
     }

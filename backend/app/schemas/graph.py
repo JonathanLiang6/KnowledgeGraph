@@ -33,11 +33,13 @@ class GraphData(BaseModel):
 
 
 class EntityDetail(BaseModel):
-    """实体详情"""
+    """实体详情 (v2.4: typed lists)"""
     id: str
     name: str
     type: str
     description: str = ""
     weight: float = 0.0
-    related_entities: list = []
-    related_documents: list = []
+    related_entities: List[dict] = []
+    related_documents: List[dict] = []
+
+    model_config = {"from_attributes": True}

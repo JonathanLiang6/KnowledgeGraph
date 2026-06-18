@@ -164,10 +164,9 @@ async def _process_document(doc_id: str, filepath: str, task_id: str):
 
             # ─── 完成 ───────────────────────────────────────────
 
-            import json
             final_graph = refined_graph if refined_graph else result_graph
             if final_graph:
-                doc.graph_data = json.dumps(final_graph, ensure_ascii=False)
+                doc.graph_data = final_graph  # v2.4: JSON 列自动序列化
                 # 更新 GraphRAG 实体索引
                 try:
                     from app.services.rag_service import update_graph_index

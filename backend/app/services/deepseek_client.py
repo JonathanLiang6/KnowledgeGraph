@@ -1,7 +1,9 @@
 """
 DeepSeek V4 API 客户端封装 - 支持 Chat Completions (含流式) 和 Embedding
+v2.4: 智能重试(仅可恢复错误) + asyncio 顶层导入
 使用 OpenAI 兼容 SDK
 """
+import asyncio
 import json
 import time
 import logging
@@ -72,9 +74,9 @@ class DeepSeekClient:
                 }
             except Exception as e:
                 logger.warning(f"DeepSeek Chat 调用失败 (尝试 {attempt + 1}/{cls.MAX_RETRIES}): {e}")
-                if attempt == cls.MAX_RETRIES - 1:
+                if attempt == cls.MAX_RETRIES - 1 or not _is_retryable_error(e):
                     raise
-                await _async_sleep(2 ** attempt)
+                await asyncio.sleep(2 ** attempt)
 
     @classmethod
     async def chat_stream(
@@ -104,12 +106,12 @@ class DeepSeekClient:
                 async for chunk in stream:
                     if chunk.choices and chunk.choices[0].delta.content:
                         yield chunk.choices[0].delta.content
-                return  # 流完成，退出
+                return
             except Exception as e:
                 logger.warning(f"DeepSeek Stream 调用失败 (尝试 {attempt + 1}/{cls.MAX_RETRIES}): {e}")
-                if attempt == cls.MAX_RETRIES - 1:
+                if attempt == cls.MAX_RETRIES - 1 or not _is_retryable_error(e):
                     raise
-                await _async_sleep(2 ** attempt)
+                await asyncio.sleep(2 ** attempt)
 
     @classmethod
     async def embed(cls, texts: List[str]) -> List[List[float]]:
@@ -127,26 +129,26 @@ class DeepSeekClient:
 
         for attempt in range(cls.MAX_RETRIES):
             try:
-                # DeepSeek 可能支持 /embeddings 端点
                 response = await client.embeddings.create(
-                    model=config.DEEPSEEK_CHAT_MODEL,
+                    model=config.EMBEDDING_MODEL,  # v2.4: 使用 embedding 模型而非 chat 模型
                     input=texts,
                 )
                 return [item.embedding for item in response.data]
             except Exception as e:
                 err_str = str(e)
-                # 404 不重试——端点不存在
-                if "404" in err_str or "not found" in err_str.lower():
-                    logger.warning(f"DeepSeek Embedding 端点不可用 (404)，请使用本地模型")
+                # v2.4: 基于 HTTP 状态码判断而非子串匹配
+                status = getattr(e, 'status_code', None)
+                if status == 404:
+                    logger.warning("DeepSeek Embedding 端点不可用 (404)，请使用本地模型")
                     raise
                 logger.warning(f"DeepSeek Embedding 调用失败 (尝试 {attempt + 1}): {e}")
-                if attempt == cls.MAX_RETRIES - 1:
+                if attempt == cls.MAX_RETRIES - 1 or not _is_retryable_error(e):
                     logger.error(
                         "DeepSeek Embedding API 不可用。"
                         f"请使用本地 Embedding 模型: {config.EMBEDDING_MODEL}"
                     )
                     raise
-                await _async_sleep(2 ** attempt)
+                await asyncio.sleep(2 ** attempt)
 
     @classmethod
     async def rewrite_query(cls, query: str, num_versions: int = 2) -> List[str]:
@@ -322,7 +324,9 @@ def _parse_entity_json(text: str) -> dict:
     return {"entities": [], "relationships": []}
 
 
-async def _async_sleep(seconds: float):
-    """异步等待"""
-    import asyncio
-    await asyncio.sleep(seconds)
+def _is_retryable_error(e: Exception) -> bool:
+    """v2.4: 判断错误是否可重试（仅网络/超时/服务端错误可重试）"""
+    status = getattr(e, 'status_code', None)
+    if status is not None:
+        return status >= 500 or status == 429  # 服务端错误或限流
+    return True  # 网络错误 → 可重试

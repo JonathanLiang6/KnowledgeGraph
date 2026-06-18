@@ -140,12 +140,12 @@ const graphHeight = ref(600)
 const hiddenTypes = reactive(new Set())
 
 let renderer = null
-let currentNodeData = []
-let currentLinkData = []
+const currentNodeData = ref([])
+const currentLinkData = ref([])
 
 const relatedLinkCount = computed(() => {
   if (!selectedEntity.value) return 0
-  return currentLinkData.filter(l => {
+  return currentLinkData.value.filter(l => {
     const sid = typeof l.source === 'object' ? l.source.id : l.source
     const tid = typeof l.target === 'object' ? l.target.id : l.target
     return sid === selectedEntity.value.id || tid === selectedEntity.value.id
@@ -155,14 +155,14 @@ const relatedLinkCount = computed(() => {
 const relatedNodes = computed(() => {
   if (!selectedEntity.value) return []
   const result = []
-  for (const l of currentLinkData) {
+  for (const l of currentLinkData.value) {
     const sid = typeof l.source === 'object' ? l.source.id : l.source
     const tid = typeof l.target === 'object' ? l.target.id : l.target
     let otherId = null
     if (sid === selectedEntity.value.id) otherId = tid
     else if (tid === selectedEntity.value.id) otherId = sid
     if (otherId) {
-      const other = currentNodeData.find(n => n.id === otherId)
+      const other = currentNodeData.value.find(n => n.id === otherId)
       if (other && !result.find(r => r.id === otherId)) {
         result.push({
           ...other,
@@ -229,8 +229,8 @@ async function refreshData() {
       nodes: res.nodes || [],
       links: res.links || [],
     })
-    currentNodeData = data.nodes
-    currentLinkData = data.links
+    currentNodeData.value = data.nodes
+    currentLinkData.value = data.links
     nodeCount.value = data.nodes.length
     linkCount.value = data.links.length
     bridgeCount.value = data.links.filter(l => l.dashed).length

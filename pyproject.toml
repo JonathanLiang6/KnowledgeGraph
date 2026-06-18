@@ -1,0 +1,18 @@
+[project]
+name = "knowledge-graph"
+version = "2.4.0"
+description = "企业级知识图谱 + RAG 问答系统"
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true

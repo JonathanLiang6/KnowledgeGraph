@@ -238,8 +238,13 @@ def _strip_html(html: str) -> str:
 # ─── 文件信息 ─────────────────────────────────────────────────────
 
 
-def get_file_info(filepath: str) -> dict:
-    """获取文件基本信息（含 MIME 检测）"""
+def get_file_info(filepath: str, file_hash: str = None) -> dict:
+    """获取文件基本信息（含 MIME 检测）。
+
+    Args:
+        filepath: 文件路径
+        file_hash: 预计算的 SHA256 哈希（避免重复计算）
+    """
     path = Path(filepath)
     ext = path.suffix.lower()
 
@@ -247,6 +252,8 @@ def get_file_info(filepath: str) -> dict:
 
     size = path.stat().st_size if path.exists() else 0
     mime = detect_mime_type(filepath)
+    if file_hash is None:
+        file_hash = compute_file_hash(filepath)
 
     return {
         "name": path.name,
@@ -255,5 +262,5 @@ def get_file_info(filepath: str) -> dict:
         "type": EXT_TO_TYPE.get(ext, "Unknown"),
         "extension": ext,
         "mime_type": mime,
-        "sha256": compute_file_hash(filepath),
+        "sha256": file_hash,
     }

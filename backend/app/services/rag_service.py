@@ -10,7 +10,7 @@ from typing import List, Optional, Dict
 from collections import OrderedDict
 from app.services.chunking_service import SemanticChunker, Chunk
 from app.services.embedding_service import EmbeddingService
-from app.services.hybrid_search import HybridSearchService, SearchResult
+from app.services.hybrid_search import HybridSearchService, SearchResult, hybrid_search_service
 from app.services.reranker_service import RerankerService
 from app.core.config import config
 
@@ -23,7 +23,7 @@ _chunker = SemanticChunker(
     chunk_overlap=config.CHUNK_OVERLAP,
     strategy="parent_child",
 )
-_hybrid_search = HybridSearchService()
+_hybrid_search = hybrid_search_service  # v2.5: 使用模块级单例
 
 # ── 图谱实体索引 (内存) + 线程安全 ──────────────────────────
 # 结构: {"实体名": {"type": "...", "related": ["关联实体1", ...], "id": "..."}}

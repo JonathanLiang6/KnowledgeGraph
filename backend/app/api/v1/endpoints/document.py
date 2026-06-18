@@ -211,8 +211,8 @@ async def upload_document(
             # 设置 file_hash 用于后续写入
             pass  # file_hash_val will be set below
 
-    # 获取文件信息
-    file_info = get_file_info(stored_path)
+    # 获取文件信息 (v2.5: 复用已计算的 hash)
+    file_info = get_file_info(stored_path, file_hash=file_hash_val if config.ENABLE_FILE_DEDUP else None)
 
     # 创建文档记录 (v2.3: 存储 file_hash 用于 DB 去重)
     doc = Document(
@@ -231,6 +231,10 @@ async def upload_document(
     # 触发异步处理
     from app.tasks.document_tasks import start_document_processing
     task_id = await start_document_processing(doc.id, stored_path)
+
+    # v2.5: 检查 upload 返回值是否有效
+    if total_written == 0:
+        raise HTTPException(status_code=400, detail="文件保存失败（写入 0 字节）")
 
     return DocumentUploadResponse(
         document_id=doc.id,
@@ -461,11 +465,10 @@ async def delete_document(doc_id: str, db: AsyncSession = Depends(get_db)):
         except OSError as e:
             logger.warning(f"删除文件失败: {doc.file_path}, {e}")
 
-    # P2: 清理检索引擎中的索引
+    # P2: 清理检索引擎中的索引 (v2.5: 使用模块级单例)
     try:
-        from app.services.hybrid_search import HybridSearchService
-        hybrid = HybridSearchService()
-        hybrid.remove_document(doc.id)
+        from app.services.hybrid_search import hybrid_search_service
+        hybrid_search_service.remove_document(doc.id)
         logger.info(f"已清理检索索引: {doc.id}")
     except Exception as e:
         logger.warning(f"清理检索索引失败（非致命）: {e}")
@@ -478,36 +481,35 @@ async def delete_document(doc_id: str, db: AsyncSession = Depends(get_db)):
 @router.get("/stats/overview", response_model=DocumentStats)
 async def get_document_stats(db: AsyncSession = Depends(get_db)):
     """
-    获取文档统计信息（增强版：含状态分布）。
+    获取文档统计信息 (v2.5: SQL 聚合，避免全量加载到 Python)。
     """
-    result = await db.execute(select(Document))
-    docs = result.scalars().all()
+    # v2.5: 使用数据库聚合计算，O(1) 网络传输
+    from sqlalchemy import case, and_
 
-    total_entities = sum(d.entity_count or 0 for d in docs)
-    total_relations = sum(d.relationship_count or 0 for d in docs)
-    total_size = sum(d.file_size or 0 for d in docs)
+    # 处理中状态: 排除 done/failed/pending
+    processing_statuses = ["parsing", "nlp_extracting", "llm_refining",
+                           "chunking", "embedding", "indexing"]
 
-    # 状态分布统计
-    status_counts = {"pending": 0, "processing": 0, "done": 0, "failed": 0}
-    for d in docs:
-        status_val = d.status.value if isinstance(d.status, DocumentStatus) else str(d.status)
-        if status_val == "done":
-            status_counts["done"] += 1
-        elif status_val == "failed":
-            status_counts["failed"] += 1
-        elif status_val in ("pending", "parsing", "nlp_extracting", "llm_refining",
-                            "chunking", "embedding", "indexing"):
-            status_counts["processing"] += 1
-        else:
-            status_counts["pending"] += 1
+    stats_query = select(
+        func.count(Document.id).label("total"),
+        func.coalesce(func.sum(Document.entity_count), 0).label("total_entities"),
+        func.coalesce(func.sum(Document.relationship_count), 0).label("total_relations"),
+        func.coalesce(func.sum(Document.file_size), 0).label("total_size"),
+        func.count().filter(Document.status == "done").label("done_count"),
+        func.count().filter(Document.status == "failed").label("failed_count"),
+        func.count().filter(Document.status.in_(processing_statuses)).label("processing_count"),
+        func.count().filter(Document.status == "pending").label("pending_count"),
+    )
+    result = await db.execute(stats_query)
+    row = result.one()
 
     return DocumentStats(
-        documents=len(docs),
-        entities=total_entities,
-        relationships=total_relations,
-        storage_used=format_file_size(total_size),
-        pending=status_counts["pending"],
-        processing=status_counts["processing"],
-        done=status_counts["done"],
-        failed=status_counts["failed"],
+        documents=row.total,
+        entities=row.total_entities,
+        relationships=row.total_relations,
+        storage_used=format_file_size(row.total_size),
+        pending=row.pending_count,
+        processing=row.processing_count,
+        done=row.done_count,
+        failed=row.failed_count,
     )

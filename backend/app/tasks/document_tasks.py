@@ -109,6 +109,11 @@ async def _process_document(doc_id: str, filepath: str, task_id: str):
                 # 已是完成状态，但被手动触发重新处理
                 start_from = -1
 
+            # v2.5: 如果 chunks 无法恢复（server 重启后内存丢失），回退到 chunking
+            if start_from >= 4 and doc.chunk_count > 0:
+                logger.info(f"断点续传: chunks 丢失 (count={doc.chunk_count}), 从 chunking 重新开始")
+                start_from = 3
+
             if start_from >= 0:
                 logger.info(f"断点续传: doc={doc_id} 从阶段 {start_from + 1} 继续")
 
@@ -119,6 +124,15 @@ async def _process_document(doc_id: str, filepath: str, task_id: str):
             result_graph = None
             refined_graph = None
             chunks = []
+            cached_content = None  # v2.5: 读取一次，多阶段复用
+
+            # v2.5: 如果跳过 parsing 但后续阶段需要内容，先读取
+            async def _ensure_content():
+                nonlocal cached_content
+                if cached_content is None:
+                    cached_content = read_file_content(filepath)
+                    if cached_content:
+                        logger.debug(f"延迟读取文件内容: {len(cached_content)} 字符")
 
             for i, (stage_key, progress, status, label) in enumerate(PROCESSING_STAGES):
                 if i < start_from:
@@ -131,20 +145,23 @@ async def _process_document(doc_id: str, filepath: str, task_id: str):
 
                 try:
                     if stage_key == "parsing":
-                        word_count, token_count = await _stage_parsing(
+                        word_count, token_count, cached_content = await _stage_parsing(
                             db, doc, filepath, task_id
                         )
                     elif stage_key == "nlp_extract":
+                        await _ensure_content()
                         result_graph = await _stage_nlp_extract(
-                            db, doc, filepath, task_id
+                            db, doc, cached_content, task_id
                         )
                     elif stage_key == "llm_refine":
+                        await _ensure_content()
                         refined_graph = await _stage_llm_refine(
-                            db, doc, filepath, result_graph, task_id
+                            db, doc, cached_content, result_graph, task_id
                         )
                     elif stage_key == "chunking":
+                        await _ensure_content()
                         chunks = await _stage_chunking(
-                            db, doc, filepath, result_graph, refined_graph, task_id
+                            db, doc, cached_content, refined_graph, task_id
                         )
                     elif stage_key == "embedding":
                         await _stage_embedding(db, doc, chunks, task_id)
@@ -219,6 +236,7 @@ async def _stage_parsing(
     """
     Stage 1: 解析文档内容。
     读取文件内容并统计字数/Token数。
+    返回 (word_count, token_count, content) 供后续阶段复用。
     """
     update_task(task_id, progress=5, stage="解析文档内容")
 
@@ -233,18 +251,17 @@ async def _stage_parsing(
     await db.flush()
 
     logger.info(f"Stage 1 [parsing]: {word_count} 字, {token_count} tokens")
-    return word_count, token_count
+    return word_count, token_count, content
 
 
 async def _stage_nlp_extract(
-    db: AsyncSession, doc: Document, filepath: str, task_id: str
+    db: AsyncSession, doc: Document, content: str, task_id: str
 ) -> dict:
     """
-    Stage 2: NLP 粗筛实体提取。
+    Stage 2: NLP 粗筛实体提取 (v2.5: 复用 parsing 阶段读取的内容)。
     """
     update_task(task_id, progress=15, stage="NLP 实体粗筛")
 
-    content = read_file_content(filepath)
     if not content:
         raise ValueError("无法读取文件内容进行 NLP 提取")
 
@@ -261,18 +278,17 @@ async def _stage_nlp_extract(
 
 
 async def _stage_llm_refine(
-    db: AsyncSession, doc: Document, filepath: str,
+    db: AsyncSession, doc: Document, content: str,
     nlp_graph: dict, task_id: str
 ) -> Optional[dict]:
     """
-    Stage 3: LLM 精炼实体。
+    Stage 3: LLM 精炼实体 (v2.5: 复用 parsing 阶段读取的内容)。
 
     使用 DeepSeek V4 校正实体与关系。
     失败时返回 None（不阻塞流程）。
     """
     update_task(task_id, progress=35, stage="LLM 实体精炼")
 
-    content = read_file_content(filepath)
     if not content:
         logger.warning("LLM 精炼跳过：无法读取文件内容")
         return None
@@ -292,16 +308,15 @@ async def _stage_llm_refine(
 
 
 async def _stage_chunking(
-    db: AsyncSession, doc: Document, filepath: str,
-    nlp_graph: dict, refined_graph: Optional[dict], task_id: str
+    db: AsyncSession, doc: Document, content: str,
+    refined_graph: Optional[dict], task_id: str
 ) -> list:
     """
-    Stage 4: 语义分块。
+    Stage 4: 语义分块 (v2.5: 复用 parsing 阶段读取的内容)。
     使用父子块架构进行文档分块。
     """
     update_task(task_id, progress=55, stage="语义分块")
 
-    content = read_file_content(filepath)
     if not content:
         raise ValueError("无法读取文件内容进行分块")
 
@@ -390,10 +405,12 @@ async def _stage_indexing(
         logger.warning("未能生成任何嵌入，跳过索引构建")
         return
 
-    # 写入混合检索引擎
-    hybrid = HybridSearchService()
+    # 写入混合检索引擎 (v2.5: 使用模块级单例，确保索引与搜索共享同一实例)
+    from app.services.hybrid_search import hybrid_search_service
+    # 清理旧索引条目，防止 reprocess 产生重复
+    hybrid_search_service.remove_document(doc.id)
     chunk_dicts = [c.to_dict() for c in child_chunks]
-    hybrid.index_document(chunk_dicts, embeddings)
+    hybrid_search_service.index_document(chunk_dicts, embeddings)
 
     logger.info(f"Stage 6 [indexing]: {len(chunk_dicts)} 子块已索引")
 

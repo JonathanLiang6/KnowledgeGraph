@@ -134,12 +134,11 @@ async def delete_knowledge_base(kb_id: str, db: AsyncSession = Depends(get_db)):
 
     kb_name = kb.name
 
-    # v2.4: 先清理检索引擎中的索引
+    # v2.5: 先清理检索引擎中的索引 (使用模块级单例)
     try:
-        from app.services.hybrid_search import HybridSearchService
-        hybrid = HybridSearchService()
+        from app.services.hybrid_search import hybrid_search_service
         for doc_id in doc_ids:
-            hybrid.remove_document(doc_id)
+            hybrid_search_service.remove_document(doc_id)
         logger.info(f"已清理 {len(doc_ids)} 个文档的检索索引")
     except Exception as e:
         logger.warning(f"清理检索索引失败（非致命）: {e}")

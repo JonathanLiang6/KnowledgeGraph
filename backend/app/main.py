@@ -39,24 +39,24 @@ async def lifespan(app: FastAPI):
         logger.critical(f"❌ 数据库初始化失败, 应用无法启动: {e}")
         raise RuntimeError(f"数据库初始化失败: {e}") from e
 
-    # P2: 从 LanceDB 恢复检索索引
+    # P2: 从 LanceDB 恢复检索索引 (v2.5: 使用模块级单例)
     try:
-        from app.services.hybrid_search import HybridSearchService
-        hybrid = HybridSearchService()
-        hybrid.vector_store.create_or_open_table("chunks")
-        if hybrid.vector_store.count > 0:
-            hybrid.rebuild_index_from_store()
-            logger.info(f"✅ 检索索引恢复: {hybrid.vector_store.count} 条向量记录")
+        from app.services.hybrid_search import hybrid_search_service
+        hybrid_search_service.vector_store.create_or_open_table("chunks")
+        if hybrid_search_service.vector_store.count > 0:
+            hybrid_search_service.rebuild_index_from_store()
+            logger.info(f"✅ 检索索引恢复: {hybrid_search_service.vector_store.count} 条向量记录")
         else:
             logger.info("📭 检索索引为空，跳过恢复")
     except Exception as e:
         logger.warning(f"⚠️ 检索索引恢复跳过: {e}")
 
-    # P1: 恢复中断的文档处理任务
+    # P1: 恢复中断的文档处理任务 (v2.5: 存储 task 句柄以便关闭时取消)
+    app.state._resume_task = None
     try:
         from app.tasks.document_tasks import resume_pending_documents
         # 延迟恢复（等待其他服务初始化完成）
-        asyncio.create_task(_delayed_resume())
+        app.state._resume_task = asyncio.create_task(_delayed_resume())
     except Exception as e:
         logger.warning(f"⚠️ 文档恢复初始化跳过: {e}")
 
@@ -67,7 +67,14 @@ async def lifespan(app: FastAPI):
     yield
 
     # ─── 关闭 ───────────────────────────────────────────────
-    logger.info("🛑 KnowledgeGraph v2.4 关闭中...")
+    logger.info("🛑 KnowledgeGraph v2.5 关闭中...")
+    # 取消后台恢复任务
+    if app.state._resume_task and not app.state._resume_task.done():
+        app.state._resume_task.cancel()
+        try:
+            await app.state._resume_task
+        except asyncio.CancelledError:
+            logger.info("后台恢复任务已取消")
     await close_db()
     logger.info("✅ 数据库连接已关闭")
 

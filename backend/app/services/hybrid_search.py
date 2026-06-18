@@ -145,8 +145,6 @@ class BM25Index:
 
         self.doc_ids.extend(d[0] for d in docs)
         self.corpus.extend(d[1] for d in docs)
-        self._pending_docs = []
-        self._dirty = False
         self._rebuild_index()
         logger.debug(f"BM25 添加 {len(docs)} 篇文档, 累计 {len(self.doc_ids)} 篇（索引已重建）")
 
@@ -489,16 +487,19 @@ class HybridSearchService:
         # 从缓存移除并收集待删除 BM25 ID
         keys_to_remove = [k for k, v in self._all_chunks_cache.items()
                           if v.get("doc_id") == doc_id]
-        to_rebuild = []
         for k in keys_to_remove:
             self._all_chunks_cache.pop(k, None)
             if k in self.bm25_index.doc_ids:
                 idx = self.bm25_index.doc_ids.index(k)
                 self.bm25_index.doc_ids.pop(idx)
                 self.bm25_index.corpus.pop(idx)
-                to_rebuild.append(k)
 
         # 批量移除后一次重建 BM25
-        if to_rebuild:
+        if keys_to_remove:
             self.bm25_index._rebuild_index()
-            logger.info(f"已移除文档索引: {doc_id} ({len(to_rebuild)} 块)")
+            logger.info(f"已移除文档索引: {doc_id} ({len(keys_to_remove)} 块)")
+
+
+# ─── 模块级单例 ─────────────────────────────────────────────────
+# 所有检索和索引操作共享同一实例，确保 BM25 和向量数据一致
+hybrid_search_service = HybridSearchService()

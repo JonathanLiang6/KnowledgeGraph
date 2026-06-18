@@ -3,6 +3,7 @@
 """
 import uuid
 import enum
+from typing import Optional
 from datetime import datetime
 from sqlalchemy import String, Text, Integer, Float, DateTime, Enum, ForeignKey, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -40,6 +41,9 @@ class Document(Base):
     file_path: Mapped[str] = mapped_column(String(1000), nullable=False, comment="存储路径")
     file_type: Mapped[str] = mapped_column(String(20), default="unknown", comment="文件类型")
     file_size: Mapped[int] = mapped_column(Integer, default=0, comment="文件大小(字节)")
+    file_hash: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, default=None, index=True, comment="文件SHA256哈希"
+    )
 
     # 处理状态
     status: Mapped[DocumentStatus] = mapped_column(

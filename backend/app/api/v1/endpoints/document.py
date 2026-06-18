@@ -29,7 +29,7 @@ from app.schemas.document import (
 from app.utils.file_parser import read_file_content, get_file_info
 from app.utils.helpers import (
     format_file_size, ensure_dir, sanitize_filename,
-    detect_mime_type, validate_file_allowed, find_duplicate_file,
+    detect_mime_type, validate_file_allowed,
     stream_save_upload, compute_file_hash,
 )
 
@@ -63,8 +63,6 @@ async def _validate_upload(file: UploadFile) -> None:
     total_size = 0
     chunk_size = 64 * 1024  # 64KB per chunk
 
-    # 读取全部内容并在过程中检查大小
-    content_chunks = []
     while True:
         chunk = await file.read(chunk_size)
         if not chunk:
@@ -75,7 +73,6 @@ async def _validate_upload(file: UploadFile) -> None:
                 status_code=413,
                 detail=f"文件大小 ({format_file_size(total_size)}) 超过限制 ({config.MAX_FILE_SIZE_MB}MB)"
             )
-        content_chunks.append(chunk)
 
     # 空文件检查
     if total_size == 0:
@@ -182,52 +179,49 @@ async def upload_document(
     # P0: 保存后 MIME 校验
     _validate_saved_file(stored_path, raw_filename)
 
-    # P0: 文件去重检查（含孤儿文件清理）
+    # P0: 文件去重检查 (v2.3: DB查询替代磁盘扫描)
     duplicate_of = None
     if config.ENABLE_FILE_DEDUP:
-        duplicate_of = find_duplicate_file(stored_path)
-        if duplicate_of:
-            # 验证匹配文件是否有关联的 DB 记录
-            dup_doc_result = await db.execute(
-                select(Document).where(Document.file_path == duplicate_of)
+        file_hash_val = compute_file_hash(stored_path)
+        dup_doc_result = await db.execute(
+            select(Document).where(
+                Document.file_hash == file_hash_val,
+                Document.kb_id == kb_id,
             )
-            dup_doc = dup_doc_result.scalar_one_or_none()
+        )
+        dup_doc = dup_doc_result.scalar_one_or_none()
 
-            if dup_doc is None:
-                # 孤儿文件：磁盘有但 DB 无记录 → 清理并继续上传
-                try:
-                    os.remove(duplicate_of)
-                    logger.info(f"清理孤儿文件: {duplicate_of}")
-                except OSError:
-                    pass
-                duplicate_of = None  # 允许继续上传
-            else:
-                # 真正的重复 → 删除新保存的文件并返回重复信息
-                try:
-                    os.remove(stored_path)
-                except OSError:
-                    pass
-                logger.info(f"检测到重复文件: {raw_filename}, 已存在: {duplicate_of} (doc={dup_doc.id})")
-                return DocumentUploadResponse(
-                    document_id="",
-                    task_id="",
-                    filename=raw_filename,
-                    status="duplicate",
-                    message=f"文件已存在（文档: {dup_doc.filename}）",
-                    duplicate=True,
-                    duplicate_of=dup_doc.id,
-                )
+        if dup_doc:
+            # 真正重复 → 删除新保存的文件
+            try:
+                os.remove(stored_path)
+            except OSError:
+                pass
+            logger.info(f"检测到重复文件: {raw_filename}, 已存在: doc={dup_doc.id}")
+            return DocumentUploadResponse(
+                document_id="",
+                task_id="",
+                filename=raw_filename,
+                status="duplicate",
+                message=f"文件已存在（文档: {dup_doc.filename}）",
+                duplicate=True,
+                duplicate_of=dup_doc.id,
+            )
+        else:
+            # 设置 file_hash 用于后续写入
+            pass  # file_hash_val will be set below
 
     # 获取文件信息
     file_info = get_file_info(stored_path)
 
-    # 创建文档记录
+    # 创建文档记录 (v2.3: 存储 file_hash 用于 DB 去重)
     doc = Document(
         kb_id=kb_id,
         filename=raw_filename,
         file_path=stored_path,
         file_type=file_info["type"],
         file_size=file_info["size"],
+        file_hash=file_hash_val if config.ENABLE_FILE_DEDUP else None,
         status=DocumentStatus.PENDING,
     )
     db.add(doc)
@@ -291,37 +285,32 @@ async def batch_upload_documents(
             # MIME 校验
             _validate_saved_file(stored_path, raw_filename)
 
-            # 去重（含孤儿文件清理）
+            # 去重 (v2.3: DB查询替代磁盘扫描)
             if config.ENABLE_FILE_DEDUP:
-                dup = find_duplicate_file(stored_path)
-                if dup:
-                    # 验证匹配文件是否有关联的 DB 记录
-                    dup_doc_result = await db.execute(
-                        select(Document).where(Document.file_path == dup)
+                file_hash_val = compute_file_hash(stored_path)
+                dup_doc_result = await db.execute(
+                    select(Document).where(
+                        Document.file_hash == file_hash_val,
+                        Document.kb_id == kb_id,
                     )
-                    dup_doc = dup_doc_result.scalar_one_or_none()
+                )
+                dup_doc = dup_doc_result.scalar_one_or_none()
 
-                    if dup_doc is None:
-                        # 孤儿文件 → 清理
-                        try:
-                            os.remove(dup)
-                        except OSError:
-                            pass
-                    else:
-                        # 真正重复
-                        try:
-                            os.remove(stored_path)
-                        except OSError:
-                            pass
-                        items.append(BatchUploadItem(
-                            filename=raw_filename,
-                            success=True,
-                            document_id=dup_doc.id,
-                            message=f"文件已存在（文档: {dup_doc.filename}）",
-                            duplicate=True,
-                        ))
-                        duplicates += 1
-                        continue
+                if dup_doc:
+                    # 真正重复
+                    try:
+                        os.remove(stored_path)
+                    except OSError:
+                        pass
+                    items.append(BatchUploadItem(
+                        filename=raw_filename,
+                        success=True,
+                        document_id=dup_doc.id,
+                        message=f"文件已存在（文档: {dup_doc.filename}）",
+                        duplicate=True,
+                    ))
+                    duplicates += 1
+                    continue
 
             # 创建记录
             file_info = get_file_info(stored_path)
@@ -331,6 +320,7 @@ async def batch_upload_documents(
                 file_path=stored_path,
                 file_type=file_info["type"],
                 file_size=file_info["size"],
+                file_hash=file_hash_val if config.ENABLE_FILE_DEDUP else None,
                 status=DocumentStatus.PENDING,
             )
             db.add(doc)
@@ -416,38 +406,27 @@ async def reprocess_document(
 @router.get("/check-duplicate", response_model=DedupCheckResponse)
 async def check_duplicate(
     file_hash: str = Query(..., description="文件 SHA256 哈希"),
+    kb_id: str = Query(default=None, description="限定知识库范围"),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    P2: 根据文件哈希检测是否已存在。
+    P2: 根据文件哈希检测是否已存在 (v2.3: DB查询替代磁盘扫描)。
+
     前端上传前可先调用此接口做客户端去重。
     """
-    # 在 LOCAL_DATA_DIR 中查找
-    dup_path = None
-    if os.path.exists(config.LOCAL_DATA_DIR):
-        for f in os.listdir(config.LOCAL_DATA_DIR):
-            fpath = os.path.join(config.LOCAL_DATA_DIR, f)
-            if os.path.isfile(fpath):
-                try:
-                    if compute_file_hash(fpath) == file_hash:
-                        dup_path = fpath
-                        break
-                except OSError:
-                    continue
+    query = select(Document).where(Document.file_hash == file_hash)
+    if kb_id:
+        query = query.where(Document.kb_id == kb_id)
+    result = await db.execute(query)
+    doc = result.scalar_one_or_none()
 
-    if dup_path:
-        # 查找对应的文档记录
-        result = await db.execute(
-            select(Document).where(Document.file_path == dup_path)
+    if doc:
+        return DedupCheckResponse(
+            has_duplicate=True,
+            duplicate_doc_id=doc.id,
+            duplicate_filename=doc.filename,
+            file_hash=file_hash,
         )
-        doc = result.scalar_one_or_none()
-        if doc:
-            return DedupCheckResponse(
-                has_duplicate=True,
-                duplicate_doc_id=doc.id,
-                duplicate_filename=doc.filename,
-                file_hash=file_hash,
-            )
 
     return DedupCheckResponse(has_duplicate=False, file_hash=file_hash)
 

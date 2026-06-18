@@ -106,13 +106,10 @@ class BM25Index:
     文档数 ≤ threshold 时使用全量重建，超过后使用增量添加。
     """
 
-    def __init__(self, incremental_threshold: int = 10):
+    def __init__(self):
         self.corpus: List[str] = []
         self.doc_ids: List[str] = []
         self._bm25 = None
-        self._dirty = False  # 标记自上次构建后有无新文档
-        self._pending_docs: List[Tuple[str, str]] = []  # 待增量添加的文档
-        self._incremental_threshold = incremental_threshold
 
     def index(self, docs: List[Tuple[str, str]]):
         """
@@ -125,9 +122,6 @@ class BM25Index:
 
         self.doc_ids = [d[0] for d in docs]
         self.corpus = [d[1] for d in docs]
-        self._pending_docs = []
-        self._dirty = False
-
         if not docs:
             self._bm25 = None
             return
@@ -138,7 +132,10 @@ class BM25Index:
 
     def add_documents(self, docs: List[Tuple[str, str]]):
         """
-        增量添加文档。
+        添加文档并立即重建索引。
+
+        v2.3 修复: 移除伪增量模式 — 不再延迟重建;
+        rank_bm25 不支持增量更新, 每次添加文档后立即全量重建。
 
         Args:
             docs: [(doc_id, text), ...] 新增文档列表
@@ -146,29 +143,27 @@ class BM25Index:
         if not docs:
             return
 
-        current_count = len(self.doc_ids)
-        if current_count < self._incremental_threshold:
-            # 文档较少 → 全量重建更快
-            all_docs = list(zip(self.doc_ids, self.corpus)) + docs
-            self.index(all_docs)
-            return
-
-        # 增量模式：添加到待处理队列，延迟重建
-        self._pending_docs.extend(docs)
-        self._dirty = True
         self.doc_ids.extend(d[0] for d in docs)
         self.corpus.extend(d[1] for d in docs)
-        logger.debug(f"BM25 增量添加: {len(docs)} 篇，累计 {len(self.doc_ids)} 篇（延迟重建）")
+        self._pending_docs = []
+        self._dirty = False
+        self._rebuild_index()
+        logger.debug(f"BM25 添加 {len(docs)} 篇文档, 累计 {len(self.doc_ids)} 篇（索引已重建）")
+
+    def _rebuild_index(self):
+        """全量重建 BM25 索引"""
+        from rank_bm25 import BM25Okapi
+        if not self.corpus:
+            self._bm25 = None
+            return
+        tokenized = [Tokenizer.tokenize(text) for text in self.corpus]
+        self._bm25 = BM25Okapi(tokenized)
+        logger.debug(f"BM25 索引重建完成: {len(self.corpus)} 篇文档")
 
     def _ensure_index(self):
-        """确保索引是最新的"""
-        if self._dirty and self._pending_docs:
-            from rank_bm25 import BM25Okapi
-            tokenized = [Tokenizer.tokenize(text) for text in self.corpus]
-            self._bm25 = BM25Okapi(tokenized)
-            self._pending_docs = []
-            self._dirty = False
-            logger.debug(f"BM25 索引重建完成: {len(self.corpus)} 篇文档")
+        """确保索引可用（延迟初始化）"""
+        if self._bm25 is None and self.corpus:
+            self._rebuild_index()
 
     def search(self, query: str, top_k: int = 10) -> List[Tuple[str, float]]:
         """
@@ -208,7 +203,7 @@ class BM25Index:
         idx = self.doc_ids.index(doc_id)
         self.doc_ids.pop(idx)
         self.corpus.pop(idx)
-        self._dirty = True
+        self._rebuild_index()
         logger.debug(f"BM25 移除文档: {doc_id}")
 
     @property
@@ -308,7 +303,13 @@ class LanceDBStore:
         if self._table is None:
             return
         try:
-            self._table.delete(f"doc_id = '{doc_id}'")
+            # v2.3: 使用参数化过滤表达式防止 SQL 注入
+            try:
+                self._table.delete("doc_id = :doc_id", filter_args={"doc_id": doc_id})
+            except TypeError:
+                # 旧版 LanceDB 不支持参数化, 回退到转义
+                safe_id = doc_id.replace("'", "''")
+                self._table.delete(f"doc_id = '{safe_id}'")
             logger.info(f"LanceDB 删除文档块: {doc_id}")
         except Exception as e:
             logger.warning(f"LanceDB 删除失败: {e}")

@@ -345,9 +345,9 @@ async def _stage_embedding(
         embeddings = await EmbeddingService.encode_async(child_texts)
 
     logger.info(f"Stage 5 [embedding]: {len(embeddings)} 个向量")
-    # 将 embeddings 临时存储到 doc 对象的上下文中（通过 chunks 引用）
-    # 实际流程中 embedding 结果会在下一个 stage 中使用
-    # 这里我们将其附加到任务状态中
+    # 将 embeddings 通过 chunks 引用传递给下一阶段 (v2.3: 消除重复计算)
+    for c, emb in zip(child_chunks, embeddings):
+        c._embedding = emb
     update_task(task_id, progress=78, stage="向量嵌入完成",
                 result={"embeddings_count": len(embeddings)})
 
@@ -372,9 +372,24 @@ async def _stage_indexing(
         logger.warning("没有子块，跳过索引构建")
         return
 
-    # 重新生成 embedding（或从缓存获取）
-    child_texts = [c.text for c in child_chunks]
-    embeddings = EmbeddingService.encode(child_texts)
+    # v2.3: 优先复用 _stage_embedding 缓存的嵌入，避免重复计算
+    child_texts = []
+    embeddings = []
+    for c in child_chunks:
+        if hasattr(c, '_embedding') and c._embedding is not None:
+            embeddings.append(c._embedding)
+        else:
+            child_texts.append(c.text)
+
+    # 对未缓存的子块异步生成嵌入
+    if child_texts:
+        from app.services.embedding_service import EmbeddingService
+        new_embeddings = await EmbeddingService.encode_async(child_texts)
+        embeddings.extend(new_embeddings)
+
+    if not embeddings:
+        logger.warning("未能生成任何嵌入，跳过索引构建")
+        return
 
     # 写入混合检索引擎
     hybrid = HybridSearchService()

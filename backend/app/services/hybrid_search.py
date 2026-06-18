@@ -197,13 +197,12 @@ class BM25Index:
         return [(doc_id, float(score)) for doc_id, score in ranked]
 
     def remove_document(self, doc_id: str):
-        """移除文档"""
+        """移除文档 (v2.4: 不再每次重建, 由调用方控制)"""
         if doc_id not in self.doc_ids:
             return
         idx = self.doc_ids.index(doc_id)
         self.doc_ids.pop(idx)
         self.corpus.pop(idx)
-        self._rebuild_index()
         logger.debug(f"BM25 移除文档: {doc_id}")
 
     @property
@@ -483,15 +482,23 @@ class HybridSearchService:
         return results
 
     def remove_document(self, doc_id: str):
-        """移除文档的索引"""
+        """移除文档的索引 (v2.4: 批量移除后一次重建 BM25)"""
         # 从 LanceDB 移除
         self.vector_store.remove_by_doc_id(doc_id)
 
-        # 从缓存移除
+        # 从缓存移除并收集待删除 BM25 ID
         keys_to_remove = [k for k, v in self._all_chunks_cache.items()
                           if v.get("doc_id") == doc_id]
+        to_rebuild = []
         for k in keys_to_remove:
             self._all_chunks_cache.pop(k, None)
-            self.bm25_index.remove_document(k)
+            if k in self.bm25_index.doc_ids:
+                idx = self.bm25_index.doc_ids.index(k)
+                self.bm25_index.doc_ids.pop(idx)
+                self.bm25_index.corpus.pop(idx)
+                to_rebuild.append(k)
 
-        logger.info(f"已移除文档索引: {doc_id}")
+        # 批量移除后一次重建 BM25
+        if to_rebuild:
+            self.bm25_index._rebuild_index()
+            logger.info(f"已移除文档索引: {doc_id} ({len(to_rebuild)} 块)")

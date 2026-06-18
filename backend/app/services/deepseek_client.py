@@ -328,5 +328,9 @@ def _is_retryable_error(e: Exception) -> bool:
     """v2.4: 判断错误是否可重试（仅网络/超时/服务端错误可重试）"""
     status = getattr(e, 'status_code', None)
     if status is not None:
-        return status >= 500 or status == 429  # 服务端错误或限流
-    return True  # 网络错误 → 可重试
+        return status >= 500 or status == 429
+    # 排除确定性的客户端错误（ValueError/TypeError等不应重试）
+    if isinstance(e, (ValueError, TypeError, AttributeError, KeyError)):
+        return False
+    # 网络/连接错误可重试
+    return True

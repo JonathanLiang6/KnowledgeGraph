@@ -116,6 +116,7 @@ async def get_entity_detail(
             stored = doc.graph_data  # v2.4: JSON 列自动反序列化
             if not stored:
                 continue
+            for node in stored.get("nodes", []):
                 nid = node.get("id", "")
                 if nid and nid not in all_nodes:
                     all_nodes[nid] = node

@@ -28,8 +28,16 @@ _hybrid_search = HybridSearchService()
 # ── 图谱实体索引 (内存) + 线程安全 ──────────────────────────
 # 结构: {"实体名": {"type": "...", "related": ["关联实体1", ...], "id": "..."}}
 _graph_entity_index: Dict[str, dict] = {}
-_graph_index_lock = asyncio.Lock()
-_graph_version: int = 0  # 图谱版本号, 用于缓存失效
+_graph_index_lock: Optional[asyncio.Lock] = None  # 延迟创建 (v2.4: 避免绑定错误事件循环)
+_graph_version: int = 0
+
+
+def _get_lock() -> asyncio.Lock:
+    """延迟获取锁 (v2.4: 确保绑定到正确的 event loop)"""
+    global _graph_index_lock
+    if _graph_index_lock is None:
+        _graph_index_lock = asyncio.Lock()
+    return _graph_index_lock
 
 
 def update_graph_index(nodes: List[dict], links: List[dict]):
@@ -67,7 +75,8 @@ def update_graph_index(nodes: List[dict], links: List[dict]):
 
 async def _extract_query_entities_async(query: str) -> List[str]:
     """从查询中快速匹配图谱实体（基于子串匹配, 带锁）"""
-    async with _graph_index_lock:
+    lock = _get_lock()
+    async with lock:
         matched = []
         for name in _graph_entity_index:
             if len(name) >= 2 and name in query:
@@ -229,6 +238,9 @@ class RAGService:
                 break
 
             text = result.parent_text if result.parent_text else result.text
+            # v2.4: 安全处理 None text
+            if not text:
+                continue
             # 文本去重
             text_key = text[:100]
             if text_key in seen_texts:
@@ -308,7 +320,8 @@ async def _graph_enhanced_search_async(
         return _do_search(query, top_k, use_rerank)
 
     # 2. 收集关联实体（带锁读取）
-    async with _graph_index_lock:
+    lock = _get_lock()
+    async with lock:
         expand_terms = []
         seen_expand = set(matched)
         for name in matched[:config.GRAPH_RAG_EXPAND_ENTITIES]:

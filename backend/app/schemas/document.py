@@ -21,7 +21,7 @@ class DocumentResponse(BaseModel):
     chunk_count: int
     entity_count: int
     relationship_count: int
-    error_message: Optional[str] = None
+    error_message: str = ""
     graph_data: Optional[dict] = None
     created_at: datetime
     processed_at: Optional[datetime] = None
@@ -48,7 +48,7 @@ class DocumentBriefResponse(BaseModel):
     progress: float
     entity_count: int
     relationship_count: int
-    error_message: Optional[str] = None
+    error_message: str = ""
     created_at: datetime
     processed_at: Optional[datetime] = None
 

@@ -196,7 +196,7 @@ class NLPEntityExtractor:
                     if len(w.strip()) > 1
                     and w not in STOP_WORDS
                     and not w.isdigit()
-                    and not re.match(r'^[^一-鿿_a-zA-Z]+$', w)
+                    and not re.match(r'^[^一-鿿㐀-䶿a-zA-Z]+$', w)  # v2.4: +CJK Ext.A
                 ]
                 if valid_words:
                     words_only = [w for w, _ in valid_words]

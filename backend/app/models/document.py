@@ -59,7 +59,7 @@ class Document(Base):
     relationship_count: Mapped[int] = mapped_column(Integer, default=0, comment="提取关系数")
 
     # 错误信息
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None, comment="错误信息")
+    error_message: Mapped[str] = mapped_column(Text, default="", comment="错误信息")
 
     # 图谱数据 (v2.4: JSON 类型替代 Text, 自动序列化)
     graph_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=None, comment="提取的图谱数据JSON")

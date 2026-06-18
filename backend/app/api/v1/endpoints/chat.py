@@ -73,7 +73,8 @@ async def chat_completions(
 
     if request.stream:
         return StreamingResponse(
-            _stream_response(chat_id, request.model, messages),
+            _stream_response(chat_id, request.model, messages,
+                           request.temperature, request.max_tokens),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -104,7 +105,8 @@ async def chat_completions(
         )
 
 
-async def _stream_response(chat_id: str, model: str, messages: List[dict]):
+async def _stream_response(chat_id: str, model: str, messages: List[dict],
+                         temperature: float = None, max_tokens: int = None):
     """SSE 流式响应生成器"""
     try:
         # 发送首帧
@@ -114,8 +116,8 @@ async def _stream_response(chat_id: str, model: str, messages: List[dict]):
         full_content = ""
         async for chunk in DeepSeekClient.chat_stream(
             messages=messages,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
+            temperature=temperature,
+            max_tokens=max_tokens,
         ):
             full_content += chunk
             yield f"data: {json.dumps({'id': chat_id, 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': model, 'choices': [{'index': 0, 'delta': {'content': chunk}, 'finish_reason': None}]})}\n\n"
@@ -168,7 +170,8 @@ async def _build_rag_messages(
         if search_results:
             context_text = RAGService.build_context(
                 search_results,
-                max_tokens=config.CONTEXT_MAX_TOKENS,
+                max_tokens=3000,  # v2.4: 默认上下文 token 上限
+                max_sources=config.CONTEXT_MAX_SOURCES,
             )
             logger.info(
                 f"RAG 检索完成: query={user_query[:50]}..., "

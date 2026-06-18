@@ -483,9 +483,9 @@ async def get_document_stats(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Document))
     docs = result.scalars().all()
 
-    total_entities = sum(d.entity_count for d in docs)
-    total_relations = sum(d.relationship_count for d in docs)
-    total_size = sum(d.file_size for d in docs)
+    total_entities = sum(d.entity_count or 0 for d in docs)
+    total_relations = sum(d.relationship_count or 0 for d in docs)
+    total_size = sum(d.file_size or 0 for d in docs)
 
     # 状态分布统计
     status_counts = {"pending": 0, "processing": 0, "done": 0, "failed": 0}

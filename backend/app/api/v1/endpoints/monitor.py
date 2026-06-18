@@ -1,8 +1,9 @@
 """
 系统监控 API - 任务进度查询、系统状态
-v2.4: 任务 TTL 自动清理 + 版本号修正
+v2.4: 任务 TTL 自动清理 + 线程安全 + 版本号修正
 """
 import time
+import threading
 import logging
 from datetime import datetime
 from typing import Dict, Optional
@@ -14,8 +15,9 @@ router = APIRouter(prefix="/monitor", tags=["系统监控"])
 # 任务过期时间（秒）
 TASK_TTL_SECONDS = 3600  # 1小时
 
-# 内存任务存储（后续可替换为 Redis）
+# 内存任务存储 + threading.Lock 保护
 _task_store: Dict[str, dict] = {}
+_task_store_lock = threading.Lock()
 
 
 def _purge_expired_tasks():
@@ -32,11 +34,12 @@ def _purge_expired_tasks():
 
 
 def create_task(task_type: str) -> str:
-    """创建新任务并返回 task_id"""
+    """创建新任务并返回 task_id (v2.4: threading.Lock 保护)"""
     import uuid
-    _purge_expired_tasks()
-    task_id = str(uuid.uuid4())
-    _task_store[task_id] = {
+    with _task_store_lock:
+        _purge_expired_tasks()
+        task_id = str(uuid.uuid4())
+        _task_store[task_id] = {
         "task_id": task_id,
         "type": task_type,
         "status": "pending",
@@ -53,21 +56,22 @@ def create_task(task_type: str) -> str:
 
 def update_task(task_id: str, status: str = None, progress: float = None,
                 stage: str = None, error: str = None, result: dict = None):
-    """更新任务状态"""
-    if task_id not in _task_store:
-        return
-    task = _task_store[task_id]
-    if status is not None:
-        task["status"] = status
-    if progress is not None:
-        task["progress"] = progress
-    if stage is not None:
-        task["stage"] = stage
-    if error is not None:
-        task["error"] = error
-    if result is not None:
-        task["result"] = result
-    task["updated_at"] = datetime.now().isoformat()
+    """更新任务状态 (v2.4: threading.Lock 保护)"""
+    with _task_store_lock:
+        if task_id not in _task_store:
+            return
+        task = _task_store[task_id]
+        if status is not None:
+            task["status"] = status
+        if progress is not None:
+            task["progress"] = progress
+        if stage is not None:
+            task["stage"] = stage
+        if error is not None:
+            task["error"] = error
+        if result is not None:
+            task["result"] = result
+        task["updated_at"] = datetime.now().isoformat()
 
 
 @router.get("/tasks")

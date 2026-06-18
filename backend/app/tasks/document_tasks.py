@@ -168,6 +168,15 @@ async def _process_document(doc_id: str, filepath: str, task_id: str):
             final_graph = refined_graph if refined_graph else result_graph
             if final_graph:
                 doc.graph_data = json.dumps(final_graph, ensure_ascii=False)
+                # 更新 GraphRAG 实体索引
+                try:
+                    from app.services.rag_service import update_graph_index
+                    update_graph_index(
+                        final_graph.get("nodes", []),
+                        final_graph.get("links", []),
+                    )
+                except Exception as e:
+                    logger.warning(f"更新图谱索引失败: {e}")
             doc.status = DocumentStatus.DONE
             doc.progress = 100.0
             doc.processed_at = datetime.now()

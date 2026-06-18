@@ -7,32 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_db
+from app.core.colors import TYPE_COLORS, get_color_for_type, get_legend
 from app.models.document import Document
 from app.schemas.graph import GraphData, GraphNode, GraphLink, EntityDetail
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/graph", tags=["知识图谱"])
-
-
-# 通用知识图谱实体配色
-TYPE_COLORS = {
-    "概念":      "#4F8CF7",
-    "人物":      "#E57373",
-    "事件":      "#FFB74D",
-    "地点":      "#4DB6AC",
-    "组织":      "#9575CD",
-    "理论":      "#F06292",
-    "方法":      "#64B5F6",
-    "公式":      "#BA68C8",
-    "定律":      "#FF8A65",
-    "学科":      "#81C784",
-    "技术":      "#4DD0E1",
-    "应用":      "#AED581",
-    "著作":      "#FFD54F",
-    "术语":      "#90A4AE",
-    "数据":      "#A1887F",
-}
-FALLBACK = list(TYPE_COLORS.values())
 
 
 @router.get("/data", response_model=GraphData)
@@ -64,7 +44,7 @@ async def get_graph_data(
                     nid = node.get("id", "")
                     if nid and nid not in nodes_map:
                         etype = node.get("type", "概念")
-                        color = TYPE_COLORS.get(etype, FALLBACK[color_idx % len(FALLBACK)])
+                        color = get_color_for_type(etype, color_idx)
                         nodes_map[nid] = GraphNode(
                             id=nid,
                             name=node.get("name", nid),
@@ -82,6 +62,7 @@ async def get_graph_data(
                         relation=link.get("relation", "关联"),
                         value=link.get("value", 0.5),
                         sentence=link.get("sentence", ""),
+                        dashed=link.get("dashed", False),
                     ))
             except (json.JSONDecodeError, TypeError) as e:
                 logger.warning(f"解析文档图谱数据失败: {e}")
@@ -102,11 +83,10 @@ async def get_graph_data(
 
     nodes = list(nodes_map.values())[:limit]
 
-    legend = {}
-    for i, t in enumerate(sorted(entity_types)):
-        legend[t] = TYPE_COLORS.get(t, FALLBACK[i % len(FALLBACK)])
-    if not legend:
-        legend = {"概念": TYPE_COLORS["概念"]}
+    # 孤立节点桥接 — 将散落小分量连入核心网络
+    nodes, links = _bridge_isolated_nodes(nodes, links)
+
+    legend = get_legend(entity_types) if entity_types else {"概念": TYPE_COLORS["概念"]}
 
     if not nodes:
         return _get_demo_graph_data()
@@ -115,27 +95,195 @@ async def get_graph_data(
 
 
 @router.get("/entity/{entity_id}", response_model=EntityDetail)
-async def get_entity_detail(entity_id: str, db: AsyncSession = Depends(get_db)):
-    """获取实体详情"""
-    result = await db.execute(select(Document).where(Document.graph_data.isnot(None)))
+async def get_entity_detail(
+    entity_id: str,
+    kb_id: str = Query(None, description="知识库ID"),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取实体详情（含关联实体和来源文档）"""
+    query = select(Document).where(Document.graph_data.isnot(None))
+    if kb_id:
+        query = query.where(Document.kb_id == kb_id)
+    result = await db.execute(query)
     docs = result.scalars().all()
+
+    all_links = []
+    all_nodes = {}
+    target_node = None
+
     for doc in docs:
         try:
             stored = json.loads(doc.graph_data) if isinstance(doc.graph_data, str) else doc.graph_data
             for node in stored.get("nodes", []):
-                if node.get("id") == entity_id:
-                    return EntityDetail(
-                        id=entity_id,
-                        name=node.get("name", entity_id),
-                        type=node.get("type", "概念"),
-                        description=node.get("description", ""),
-                        weight=node.get("weight", 0.5),
-                        related_entities=[],
-                        related_documents=[doc.filename],
-                    )
+                nid = node.get("id", "")
+                if nid and nid not in all_nodes:
+                    all_nodes[nid] = node
+                    if nid == entity_id:
+                        target_node = node
+            for link in stored.get("links", []):
+                all_links.append(link)
         except (json.JSONDecodeError, TypeError):
             continue
-    raise HTTPException(status_code=404, detail="实体不存在")
+
+    if not target_node:
+        raise HTTPException(status_code=404, detail="实体不存在")
+
+    # 收集关联实体
+    related_entities = []
+    related_docs = [doc.filename for doc in docs if doc.filename]
+    seen_related = set()
+
+    for link in all_links:
+        src = link.get("source", "")
+        tgt = link.get("target", "")
+        other_id = None
+        if src == entity_id:
+            other_id = tgt
+        elif tgt == entity_id:
+            other_id = src
+        if other_id and other_id in all_nodes and other_id not in seen_related:
+            other = all_nodes[other_id]
+            related_entities.append({
+                "id": other_id,
+                "name": other.get("name", other_id),
+                "type": other.get("type", "概念"),
+                "relation": link.get("relation", "关联"),
+                "color": other.get("color", get_color_for_type(other.get("type", "概念"), 0)),
+                "weight": other.get("weight", 0.5),
+            })
+            seen_related.add(other_id)
+
+    return EntityDetail(
+        id=entity_id,
+        name=target_node.get("name", entity_id),
+        type=target_node.get("type", "概念"),
+        description=target_node.get("description", ""),
+        weight=target_node.get("weight", 0.5),
+        related_entities=related_entities,
+        related_documents=related_docs,
+    )
+
+
+def _bridge_isolated_nodes(nodes: list, links: list) -> tuple:
+    """
+    将孤立节点和极小连通分量通过虚线弱关联连接到核心网络。
+
+    算法:
+    1. Union-Find 计算连通分量
+    2. 识别主分量 (节点数 >= 3 或包含 top-5 高权重节点)
+    3. 对非主分量节点计算与核心节点的名称相似度
+    4. 创建 dashed 弱关联边
+    """
+    if len(nodes) < 3:
+        return nodes, links
+
+    n = len(nodes)
+    node_ids = [nd.id for nd in nodes]
+    id_to_idx = {nid: i for i, nid in enumerate(node_ids)}
+    name_to_id = {nd.name: nd.id for nd in nodes}
+
+    # Union-Find
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        pa, pb = find(a), find(b)
+        if pa != pb:
+            parent[pb] = pa
+
+    for link in links:
+        si = id_to_idx.get(link.source)
+        ti = id_to_idx.get(link.target)
+        if si is not None and ti is not None:
+            union(si, ti)
+
+    # 分组
+    comps: dict[int, list[int]] = {}
+    for i in range(n):
+        r = find(i)
+        comps.setdefault(r, []).append(i)
+
+    # 识别主分量
+    sorted_nodes = sorted(nodes, key=lambda nd: nd.weight or 0, reverse=True)
+    top5_ids = {nd.id for nd in sorted_nodes[:5]}
+    main_root = None
+    main_size = 0
+    for root, indices in comps.items():
+        if len(indices) > main_size:
+            main_size = len(indices)
+            main_root = root
+
+    # 主分量: 最大分量 或 包含 top-5 节点 或 size >= 3
+    main_roots = set()
+    for root, indices in comps.items():
+        comp_ids = {node_ids[i] for i in indices}
+        if len(indices) >= 3 or bool(comp_ids & top5_ids) or root == main_root:
+            main_roots.add(root)
+
+    if not main_roots:
+        return nodes, links
+
+    # 核心节点池
+    core_pool = []
+    for root in main_roots:
+        for i in comps[root]:
+            core_pool.append(nodes[i])
+    core_names = {nd.name for nd in core_pool}
+
+    # 桥接
+    max_new_edges = max(1, n // 3)
+    new_edge_count = 0
+    existing_edges = {(l.source, l.target) for l in links}
+    existing_edges.update({(l.target, l.source) for l in links})
+
+    new_links = list(links)
+
+    for root, indices in comps.items():
+        if root in main_roots:
+            continue
+        for i in indices:
+            if new_edge_count >= max_new_edges:
+                break
+            node = nodes[i]
+            if node.name in core_names:
+                continue
+
+            # 计算与核心节点的名称相似度 (Jaccard)
+            best_core = None
+            best_sim = 0.0
+            n_chars = set(node.name)
+            for core in core_pool:
+                c_chars = set(core.name)
+                intersection = n_chars & c_chars
+                union = n_chars | c_chars
+                sim = len(intersection) / len(union) if union else 0
+                if sim > best_sim and sim > 0.15:  # 最低相似阈值
+                    best_sim = sim
+                    best_core = core
+
+            if best_core and (node.id, best_core.id) not in existing_edges:
+                new_links.append(GraphLink(
+                    id=f"bridge_{node.id}_{best_core.id}",
+                    source=node.id,
+                    target=best_core.id,
+                    relation="弱关联",
+                    value=round(0.1 + best_sim * 0.15, 3),
+                    sentence="",
+                    dashed=True,
+                ))
+                existing_edges.add((node.id, best_core.id))
+                existing_edges.add((best_core.id, node.id))
+                new_edge_count += 1
+
+    if new_edge_count > 0:
+        logger.info(f"图谱桥接: {new_edge_count} 条虚线弱关联边")
+
+    return nodes, new_links
 
 
 def _get_demo_graph_data() -> GraphData:

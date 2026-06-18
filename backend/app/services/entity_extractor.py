@@ -1,9 +1,9 @@
 """
 第一阶段：NLP 粗筛实体提取器
-- jieba 分词 + POS 词性标注
-- spaCy NER 命名实体识别（可选）
+- jieba 分词 + POS 词性标注（修复版）
 - TF-IDF 关键字权重计算
 - 基于 Markdown 标题的实体分类
+- 停用词过滤 + 共现关系提取
 """
 import re
 import logging
@@ -32,6 +32,19 @@ STOP_WORDS = set([
     'before', 'after', 'above', 'below', 'between', 'under', 'again',
 ])
 
+# 中文词性 → 实体类型映射
+POS_TO_ENTITY_TYPE: Dict[str, str] = {
+    'nr': '人物',      # 人名
+    'ns': '地点',      # 地名
+    'nt': '机构',      # 机构团体
+    'nz': '概念',      # 其他专名
+    'n': '概念',       # 名词 → 概念
+    'vn': '概念',      # 动名词
+    'eng': '概念',     # 英文
+    't': '时间',       # 时间词
+    'm': '方法',       # 数词 → 可能表示公式/方法
+}
+
 # 关系匹配模式
 RELATION_PATTERNS = {
     '包含': [r'包含|包括|涵盖|分为|由.*组成'],
@@ -49,11 +62,29 @@ class NLPEntityExtractor:
     """
     第一阶段 NLP 粗筛实体提取器。
     基于 jieba + TF-IDF + 标题分区，不依赖 LLM。
+
+    修复：
+    - 修复了死代码 POS 标注逻辑
+    - 修复了 jieba 分词空输入崩溃问题
+    - 使用 jieba.posseg 进行词性标注 + 实体类型推导
     """
 
     def __init__(self):
         self.entity_colors: Dict[str, str] = {}
         self.color_index = 0
+        self._ensure_jieba_initialized()
+
+    @staticmethod
+    def _ensure_jieba_initialized():
+        """确保 jieba 已初始化"""
+        try:
+            import jieba
+            import jieba.posseg as pseg
+            # 预热：触发词典加载
+            list(jieba.cut("初始化"))
+            list(pseg.cut("初始化"))
+        except Exception as e:
+            logger.warning(f"jieba 初始化警告: {e}")
 
     def _get_color_for_type(self, entity_type: str) -> str:
         """为实体类型分配一致的冷色调颜色"""
@@ -69,10 +100,10 @@ class NLPEntityExtractor:
 
         Returns:
             (entities, relationships, legend)
-            entities: [{"id", "name", "type", "weight", "color", "pos"}, ...]
-            relationships: [{"id", "source", "target", "relation", "value", "sentence"}, ...]
-            legend: {"类型名": "颜色", ...}
         """
+        if not text or not text.strip():
+            return [], [], {}
+
         # 1. 按 Markdown 标题分块
         blocks = self._split_by_headers(text)
 
@@ -86,6 +117,8 @@ class NLPEntityExtractor:
         entities, relationships = self.optimize(entities, relationships)
 
         return entities, relationships, self.entity_colors
+
+    # ─── 分块 ─────────────────────────────────────────────────────
 
     def _split_by_headers(self, text: str) -> List[Tuple[str, str]]:
         """按 Markdown 标题分块，标题作为实体类型"""
@@ -102,7 +135,9 @@ class NLPEntityExtractor:
 
                 raw_title = title_match.group(2).strip()
                 # 过滤编号前缀
-                clean_title = re.sub(r'^[\d\.、一二三四五六七八九十①②③④⑤⑥⑦⑧⑨⑩]+', '', raw_title).strip()
+                clean_title = re.sub(
+                    r'^[\d\.、一二三四五六七八九十①②③④⑤⑥⑦⑧⑨⑩]+', '', raw_title
+                ).strip()
                 if not clean_title:
                     clean_title = raw_title
                 if len(clean_title) > 15:
@@ -118,85 +153,132 @@ class NLPEntityExtractor:
 
         return blocks
 
+    # ─── 实体提取（修复版）─────────────────────────────────────────
+
     def _extract_from_blocks(
         self, blocks: List[Tuple[str, str]]
     ) -> Tuple[List[dict], set, List[Tuple[str, List[str]]]]:
-        """从每个块提取 TF-IDF 关键词作为实体"""
+        """
+        从每个块提取 TF-IDF 关键词作为实体。
+
+        修复：
+        - 使用 jieba.posseg 进行词性标注并推导实体类型
+        - 修复了原有死代码（空循环 + pass）
+        - 空内容不去调用 jieba.analyse.extract_tags（避免崩溃）
+        """
         import jieba
         import jieba.analyse
         import jieba.posseg as pseg
 
         entities = []
         entity_names = set()
-        entity_id = 1
+        entity_id = 0
         processed_sentences = []
+
+        # 按实体名称追踪最优 POS（用于类型推导）
+        entity_pos_best: Dict[str, Tuple[str, int]] = {}
 
         for title, content in blocks:
             # 分句
             sentences = re.split(r'[。！？.!?\n]+', content)
             sentences = [s.strip() for s in sentences if s.strip()]
+            if not sentences:
+                continue
 
-            block_words = []
+            block_words: List[str] = []
             for sentence in sentences:
                 # jieba 分词（含词性标注）
                 try:
                     words_with_pos = [(w.word, w.flag) for w in pseg.cut(sentence)]
                 except Exception:
-                    words_with_pos = [(w, 'x') for w in jieba.cut(sentence)]
+                    # pseg 失败时回退到基本分词
+                    try:
+                        words_with_pos = [(w, 'x') for w in jieba.cut(sentence)]
+                    except Exception:
+                        continue
 
                 valid_words = [
                     (w, pos) for w, pos in words_with_pos
                     if len(w.strip()) > 1
                     and w not in STOP_WORDS
                     and not w.isdigit()
-                    and not re.match(r'^[^一-龥a-zA-Z]+$', w)
+                    and not re.match(r'^[^一-鿿_a-zA-Z]+$', w)
                 ]
                 if valid_words:
-                    processed_sentences.append((sentence, [w for w, _ in valid_words]))
-                    block_words.extend([w for w, _ in valid_words])
+                    words_only = [w for w, _ in valid_words]
+                    processed_sentences.append((sentence, words_only))
+                    block_words.extend(words_only)
+
+                    # 统计每个词的词性出现频次
+                    for w, pos in valid_words:
+                        if w not in entity_pos_best:
+                            entity_pos_best[w] = (pos, 1)
+                        else:
+                            prev_pos, count = entity_pos_best[w]
+                            if pos == prev_pos:
+                                entity_pos_best[w] = (pos, count + 1)
+                            elif count > 1:
+                                entity_pos_best[w] = (prev_pos, count - 1)
+                            else:
+                                # 用新词性替换（更常见）
+                                entity_pos_best[w] = (pos, 1)
 
             if not block_words:
                 continue
 
-            # TF-IDF 关键词提取
-            keywords = jieba.analyse.extract_tags(
-                ' '.join(block_words), topK=20, withWeight=True
-            )
+            # TF-IDF 关键词提取（需要确保输入非空）
+            block_text = ' '.join(block_words)
+            if not block_text.strip():
+                continue
+
+            try:
+                keywords = jieba.analyse.extract_tags(
+                    block_text, topK=20, withWeight=True
+                )
+            except Exception as e:
+                logger.warning(f"TF-IDF 提取失败: {e}")
+                keywords = [(w, 1.0) for w in set(block_words)]
 
             for keyword, weight in keywords:
                 if keyword in entity_names:
                     continue
 
-                color = self._get_color_for_type(title)
+                # 根据词性推导实体类型
+                best_pos = entity_pos_best.get(keyword, ('n', 1))[0]
+                entity_type = POS_TO_ENTITY_TYPE.get(best_pos, title)
 
-                # 尝试获取词性
-                pos_tag = 'n'  # 默认名词
-                for w, pos in [(w, pos) for w, pos in [('', '')]]:  # 简化处理
-                    pass
+                color = self._get_color_for_type(entity_type)
 
                 entities.append({
                     "id": str(entity_id),
                     "name": keyword,
-                    "type": title,
+                    "type": entity_type,
                     "weight": round(weight, 4),
                     "color": color,
-                    "pos": pos_tag,
+                    "pos": best_pos,
                 })
                 entity_names.add(keyword)
                 entity_id += 1
 
         return entities, entity_names, processed_sentences
 
+    # ─── 关系提取 ─────────────────────────────────────────────────
+
     def _extract_relationships(
         self, entities: List[dict], processed_sentences: List[Tuple[str, List[str]]]
     ) -> List[dict]:
         """基于共现和模式匹配提取关系"""
         relationships = []
-        relationship_id = 1
+        relationship_id = 0
         entity_map = {e["name"]: e["id"] for e in entities}
+
+        # 用于合并重复边
+        edge_map: Dict[Tuple[str, str], dict] = {}
 
         for sentence, words in processed_sentences:
             sentence_entities = [w for w in words if w in entity_map]
+            if len(sentence_entities) < 2:
+                continue
 
             for i in range(len(sentence_entities)):
                 for j in range(i + 1, len(sentence_entities)):
@@ -213,26 +295,21 @@ class NLPEntityExtractor:
                     relation_type = self._identify_relation_type(sentence)
 
                     # 合并重复边
-                    existing = False
-                    for rel in relationships:
-                        if (rel["source"] == source and rel["target"] == target) or \
-                           (rel["source"] == target and rel["target"] == source):
-                            rel["value"] += weight
-                            existing = True
-                            break
-
-                    if not existing:
-                        relationships.append({
+                    edge_key = (min(source, target), max(source, target))
+                    if edge_key in edge_map:
+                        edge_map[edge_key]["value"] += weight
+                    else:
+                        edge_map[edge_key] = {
                             "id": str(relationship_id),
                             "source": source,
                             "target": target,
                             "relation": relation_type,
                             "value": round(weight, 4),
                             "sentence": sentence[:100],
-                        })
+                        }
                         relationship_id += 1
 
-        return relationships
+        return list(edge_map.values())
 
     @staticmethod
     def _identify_relation_type(context: str) -> str:
@@ -243,17 +320,21 @@ class NLPEntityExtractor:
                     return relation_type
         return "关联"
 
+    # ─── 优化去噪 ─────────────────────────────────────────────────
+
     def optimize(
         self, entities: List[dict], relationships: List[dict]
     ) -> Tuple[List[dict], List[dict]]:
         """
         去噪优化：
-        - 过滤低权重实体（< 0.02）
-        - 限制实体数量（≤ 60）
-        - 限制关系数量（≤ 80）
+        - 过滤低权重实体
+        - 限制实体/关系数量
         - 重新索引 ID
         """
         from app.core.config import config
+
+        if not entities:
+            return [], []
 
         # 过滤低权重实体
         threshold = config.ENTITY_WEIGHT_THRESHOLD
@@ -266,10 +347,10 @@ class NLPEntityExtractor:
                 filtered_entities, key=lambda x: x["weight"], reverse=True
             )[:max_entities]
 
-        # 更新 entity name → id 映射
-        entity_map = {e["name"]: e["id"] for e in filtered_entities}
+        # 构建 name → id 映射
+        entity_name_to_id = {e["name"]: e["id"] for e in filtered_entities}
 
-        # 过滤关系
+        # 过滤关系：确保源和目标都在过滤后的实体中
         filtered_relationships = []
         for rel in relationships:
             source_entity = next((e for e in entities if e["id"] == rel["source"]), None)
@@ -278,9 +359,9 @@ class NLPEntityExtractor:
             if source_entity and target_entity:
                 src_name = source_entity["name"]
                 tgt_name = target_entity["name"]
-                if src_name in entity_map and tgt_name in entity_map:
-                    rel["source"] = entity_map[src_name]
-                    rel["target"] = entity_map[tgt_name]
+                if src_name in entity_name_to_id and tgt_name in entity_name_to_id:
+                    rel["source"] = entity_name_to_id[src_name]
+                    rel["target"] = entity_name_to_id[tgt_name]
                     filtered_relationships.append(rel)
 
         # 限制关系数量
@@ -290,12 +371,12 @@ class NLPEntityExtractor:
                 filtered_relationships, key=lambda x: x["value"], reverse=True
             )[:max_rels]
 
-        # 重新索引
+        # 重新索引 ID
         optimized_entities = []
-        new_id_map = {}
+        new_name_to_id = {}
         for i, entity in enumerate(filtered_entities):
             new_id = str(i + 1)
-            new_id_map[entity["name"]] = new_id
+            new_name_to_id[entity["name"]] = new_id
             optimized_entities.append({
                 "id": new_id,
                 "name": entity["name"],
@@ -316,8 +397,8 @@ class NLPEntityExtractor:
             if source_name and target_name:
                 optimized_relationships.append({
                     "id": str(i + 1),
-                    "source": new_id_map[source_name],
-                    "target": new_id_map[target_name],
+                    "source": new_name_to_id[source_name],
+                    "target": new_name_to_id[target_name],
                     "relation": rel["relation"],
                     "value": rel["value"],
                     "sentence": rel.get("sentence", ""),

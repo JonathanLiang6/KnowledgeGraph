@@ -134,12 +134,16 @@ class DeepSeekClient:
                 )
                 return [item.embedding for item in response.data]
             except Exception as e:
+                err_str = str(e)
+                # 404 不重试——端点不存在
+                if "404" in err_str or "not found" in err_str.lower():
+                    logger.warning(f"DeepSeek Embedding 端点不可用 (404)，请使用本地模型")
+                    raise
                 logger.warning(f"DeepSeek Embedding 调用失败 (尝试 {attempt + 1}): {e}")
                 if attempt == cls.MAX_RETRIES - 1:
-                    # 如果 DeepSeek embedding 不可用，回退到本地 BGE 模型提示
                     logger.error(
                         "DeepSeek Embedding API 不可用。"
-                        f"请确保 DEEPSEEK_API_BASE 正确或使用本地 Embedding 模型: {config.EMBEDDING_MODEL}"
+                        f"请使用本地 Embedding 模型: {config.EMBEDDING_MODEL}"
                     )
                     raise
                 await _async_sleep(2 ** attempt)

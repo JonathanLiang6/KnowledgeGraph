@@ -33,6 +33,7 @@ class Config:
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
     EMBEDDING_DEVICE: str = os.getenv("EMBEDDING_DEVICE", "cpu")
     EMBEDDING_DIM: int = int(os.getenv("EMBEDDING_DIM", "512"))
+    EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
 
     # ========================
     # Reranker 模型配置 (本地 BGE)
@@ -58,12 +59,50 @@ class Config:
     COMMUNITY_LEVEL: int = int(os.getenv("COMMUNITY_LEVEL", "2"))
 
     # ========================
-    # 分块参数（优化：更小块 = 更快嵌入）
+    # 分块参数
     # ========================
     CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "800"))
     CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "50"))
     PARENT_CHUNK_SIZE: int = int(os.getenv("PARENT_CHUNK_SIZE", "800"))
     CHILD_CHUNK_SIZE: int = int(os.getenv("CHILD_CHUNK_SIZE", "200"))
+
+    # ========================
+    # 文件上传限制 (P0 安全加固)
+    # ========================
+    MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
+    MAX_FILE_SIZE_BYTES: int = MAX_FILE_SIZE_MB * 1024 * 1024
+    ALLOWED_MIME_TYPES: list = [
+        "text/plain",
+        "text/markdown",
+        "text/x-markdown",
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "text/html",
+        "application/epub+zip",
+    ]
+    ALLOWED_EXTENSIONS: set = {
+        ".txt", ".md", ".markdown", ".pdf", ".docx", ".pptx", ".html", ".htm", ".epub",
+    }
+    # 是否启用文件去重（基于 SHA256）
+    ENABLE_FILE_DEDUP: bool = os.getenv("ENABLE_FILE_DEDUP", "true").lower() == "true"
+
+    # ========================
+    # 并发控制 (P1 流水线重构)
+    # ========================
+    MAX_CONCURRENT_DOCUMENT_PROCESSING: int = int(os.getenv("MAX_CONCURRENT_DOC_PROCESSING", "3"))
+    DOCUMENT_PROCESSING_TIMEOUT_MINUTES: int = int(os.getenv("DOC_PROCESSING_TIMEOUT", "30"))
+    # CPU 密集型任务（Embedding/Reranker）线程池大小
+    CPU_WORKER_THREADS: int = int(os.getenv("CPU_WORKER_THREADS", "2"))
+
+    # ========================
+    # 检索引擎配置 (P2)
+    # ========================
+    LANCEDB_PATH: str = os.getenv("LANCEDB_PATH", str(BASE_DIR / "data" / "lancedb"))
+    # 索引自动持久化间隔（秒），0 表示每次写入都持久化
+    INDEX_PERSIST_INTERVAL: int = int(os.getenv("INDEX_PERSIST_INTERVAL", "0"))
+    # BM25 增量更新 vs 全量重建阈值（文档数超过此值启用增量）
+    BM25_INCREMENTAL_THRESHOLD: int = int(os.getenv("BM25_INCREMENTAL_THRESHOLD", "10"))
 
     # ========================
     # 提示词文件路径
@@ -99,7 +138,7 @@ class Config:
     VECTOR_WEIGHT: float = float(os.getenv("VECTOR_WEIGHT", "0.7"))
 
     # ========================
-    # 知识图谱配置（优化：减少实体数加速处理）
+    # 知识图谱配置
     # ========================
     ENTITY_WEIGHT_THRESHOLD: float = float(os.getenv("ENTITY_WEIGHT_THRESHOLD", "0.02"))
     MAX_ENTITIES: int = int(os.getenv("MAX_ENTITIES", "30"))

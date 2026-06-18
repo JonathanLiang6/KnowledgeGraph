@@ -1,5 +1,6 @@
 """
 RAG 编排服务 - 串联 chunk → embed → hybrid search → rerank → build context
+v2.1: 使用异步 Embedding 避免阻塞事件循环
 """
 import logging
 from typing import List, Optional
@@ -32,7 +33,7 @@ class RAGService:
         """
         对文档进行完整索引：
         1. 分块（父子块架构）
-        2. 生成 Embedding（仅子块）
+        2. 生成 Embedding（仅子块）— 异步避免阻塞
         3. 写入 LanceDB（子块向量 + 父块文本）
         4. 构建 BM25 索引
 
@@ -46,9 +47,9 @@ class RAGService:
 
         logger.info(f"文档 {doc_id}: {len(parent_chunks)} 父块, {len(child_chunks)} 子块")
 
-        # 2. 仅对子块生成 Embedding
+        # 2. 仅对子块生成 Embedding（异步，不阻塞事件循环）
         child_texts = [c.text for c in child_chunks]
-        embeddings = EmbeddingService.encode(child_texts)
+        embeddings = await EmbeddingService.encode_async(child_texts)
 
         # 3. 写入混合检索引擎
         chunk_dicts = [c.to_dict() for c in child_chunks]
@@ -73,19 +74,11 @@ class RAGService:
         2. 混合检索（向量 + BM25 → RRF 融合）
         3. 重排序（可选）
         4. 返回结果（含父块上下文）
-
-        Args:
-            query: 查询文本
-            top_k: 返回数量
-            use_rerank: 是否启用重排序
-
-        Returns:
-            排序后的检索结果列表
         """
         if top_k is None:
             top_k = config.HYBRID_SEARCH_TOP_K
 
-        # 1. 生成查询向量
+        # 1. 生成查询向量（同步，单个向量很快）
         query_vector = EmbeddingService.encode_single(query)
 
         # 2. 混合检索
@@ -114,17 +107,50 @@ class RAGService:
         return results[:top_k]
 
     @classmethod
+    async def search_async(
+        cls,
+        query: str,
+        top_k: int = None,
+        use_rerank: bool = True,
+    ) -> List[SearchResult]:
+        """
+        异步查询检索（推荐在 async 路由中使用）。
+        """
+        if top_k is None:
+            top_k = config.HYBRID_SEARCH_TOP_K
+
+        # 异步生成查询向量
+        query_vector = await EmbeddingService.encode_single_async(query)
+
+        # 混合检索
+        results = _hybrid_search.search(query, query_vector, top_k=top_k * 2)
+
+        # 重排序
+        if use_rerank and len(results) > top_k:
+            rerank_input = [
+                {"text": r.text, "score": r.score, "chunk_id": r.chunk_id,
+                 "parent_text": r.parent_text, "source": r.source}
+                for r in results
+            ]
+            reranked = RerankerService.rerank(query, rerank_input, top_k=top_k)
+
+            results = []
+            for item in reranked:
+                results.append(SearchResult(
+                    chunk_id=item["chunk_id"],
+                    text=item["text"],
+                    score=item.get("rerank_score", item.get("score", 0)),
+                    parent_text=item.get("parent_text"),
+                    source=item.get("source", ""),
+                ))
+
+        return results[:top_k]
+
+    @classmethod
     def build_context(cls, results: List[SearchResult], max_tokens: int = 3000) -> str:
         """
         将检索结果构建为 LLM 上下文文本。
         优先使用父块（完整上下文），回退到子块。
-
-        Args:
-            results: 检索结果列表
-            max_tokens: 上下文最大 token 数
-
-        Returns:
-            构建好的上下文字符串
         """
         from app.utils.helpers import count_tokens_approximate
 

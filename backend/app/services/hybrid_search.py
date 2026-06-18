@@ -1,10 +1,11 @@
 """
 混合检索服务 - LanceDB 向量检索 + BM25 稀疏检索 + RRF 融合
+P2 优化：BM25 增量更新、LanceDB 持久化、分词修复
 """
 import os
 import logging
-from typing import List, Tuple, Optional
-from dataclasses import dataclass
+from typing import List, Tuple, Optional, Dict
+from dataclasses import dataclass, field
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -17,23 +18,105 @@ class SearchResult:
     text: str
     score: float
     parent_text: Optional[str] = None
-    source: str = ""  # "vector" or "bm25"
+    source: str = ""  # "vector", "bm25", "fusion"
 
+
+# ─── 分词器（修复版）─────────────────────────────────────────────
+
+class Tokenizer:
+    """
+    统一分词器 - 中英文混合分词。
+    优先使用 jieba，失败时回退到字符级分词。
+    """
+
+    _jieba_available: Optional[bool] = None
+
+    @classmethod
+    def tokenize(cls, text: str) -> List[str]:
+        """
+        对文本进行分词。
+
+        Returns:
+            词条列表
+        """
+        if not text:
+            return []
+
+        # 中英文混合文本 → 需要分词
+        has_chinese = any('一' <= ch <= '鿿' for ch in text)
+
+        if not has_chinese:
+            # 纯英文/数字 → 空格分词 + 小写
+            return text.lower().split()
+
+        # 中文文本 → jieba 分词
+        return cls._jieba_tokenize(text)
+
+    @classmethod
+    def _jieba_tokenize(cls, text: str) -> List[str]:
+        """jieba 分词，带错误恢复"""
+        if cls._jieba_available is None:
+            cls._check_jieba()
+
+        if cls._jieba_available:
+            try:
+                import jieba
+                return list(jieba.cut(text))
+            except Exception as e:
+                logger.warning(f"jieba 分词失败: {e}，回退到字符级分词")
+                cls._jieba_available = False
+
+        # 回退：字符 + 英文词混合分词
+        return cls._fallback_tokenize(text)
+
+    @classmethod
+    def _check_jieba(cls):
+        """检查 jieba 是否可用"""
+        try:
+            import jieba
+            # 预热
+            list(jieba.cut("测试分词"))
+            cls._jieba_available = True
+        except Exception:
+            cls._jieba_available = False
+
+    @staticmethod
+    def _fallback_tokenize(text: str) -> List[str]:
+        """回退分词：中文字符级 + 英文词级"""
+        import re
+        tokens = []
+        # 提取中文字符序列和英文单词
+        for match in re.finditer(r'[一-鿿]+|[a-zA-Z]+|\d+', text):
+            segment = match.group()
+            if re.match(r'[一-鿿]', segment[0]):
+                # 中文字符 → 逐字 + 双字组合
+                tokens.extend(list(segment))
+                if len(segment) >= 2:
+                    tokens.extend(segment[i:i+2] for i in range(len(segment) - 1))
+            else:
+                tokens.append(segment.lower())
+        return tokens
+
+
+# ─── BM25 索引（增量更新）────────────────────────────────────────
 
 class BM25Index:
     """
-    轻量级 BM25 索引。
-    基于 rank_bm25 库实现稀疏检索。
+    BM25 索引 — 支持增量更新。
+    文档数 ≤ threshold 时使用全量重建，超过后使用增量添加。
     """
 
-    def __init__(self):
+    def __init__(self, incremental_threshold: int = 10):
         self.corpus: List[str] = []
         self.doc_ids: List[str] = []
         self._bm25 = None
+        self._dirty = False  # 标记自上次构建后有无新文档
+        self._pending_docs: List[Tuple[str, str]] = []  # 待增量添加的文档
+        self._incremental_threshold = incremental_threshold
 
     def index(self, docs: List[Tuple[str, str]]):
         """
-        构建 BM25 索引
+        全量构建 BM25 索引。
 
         Args:
             docs: [(doc_id, text), ...] 列表
@@ -42,27 +125,71 @@ class BM25Index:
 
         self.doc_ids = [d[0] for d in docs]
         self.corpus = [d[1] for d in docs]
+        self._pending_docs = []
+        self._dirty = False
 
-        # 对中文文本进行分词处理
-        tokenized = [self._tokenize(text) for text in self.corpus]
+        if not docs:
+            self._bm25 = None
+            return
+
+        tokenized = [Tokenizer.tokenize(text) for text in self.corpus]
         self._bm25 = BM25Okapi(tokenized)
-        logger.info(f"BM25 索引构建完成: {len(docs)} 篇文档")
+        logger.info(f"BM25 全量索引构建完成: {len(docs)} 篇文档")
+
+    def add_documents(self, docs: List[Tuple[str, str]]):
+        """
+        增量添加文档。
+
+        Args:
+            docs: [(doc_id, text), ...] 新增文档列表
+        """
+        if not docs:
+            return
+
+        current_count = len(self.doc_ids)
+        if current_count < self._incremental_threshold:
+            # 文档较少 → 全量重建更快
+            all_docs = list(zip(self.doc_ids, self.corpus)) + docs
+            self.index(all_docs)
+            return
+
+        # 增量模式：添加到待处理队列，延迟重建
+        self._pending_docs.extend(docs)
+        self._dirty = True
+        self.doc_ids.extend(d[0] for d in docs)
+        self.corpus.extend(d[1] for d in docs)
+        logger.debug(f"BM25 增量添加: {len(docs)} 篇，累计 {len(self.doc_ids)} 篇（延迟重建）")
+
+    def _ensure_index(self):
+        """确保索引是最新的"""
+        if self._dirty and self._pending_docs:
+            from rank_bm25 import BM25Okapi
+            tokenized = [Tokenizer.tokenize(text) for text in self.corpus]
+            self._bm25 = BM25Okapi(tokenized)
+            self._pending_docs = []
+            self._dirty = False
+            logger.debug(f"BM25 索引重建完成: {len(self.corpus)} 篇文档")
 
     def search(self, query: str, top_k: int = 10) -> List[Tuple[str, float]]:
         """
-        BM25 搜索
+        BM25 搜索。
 
         Returns:
             [(doc_id, score), ...] 按分数降序排列
         """
-        if self._bm25 is None:
+        self._ensure_index()
+
+        if self._bm25 is None or not self.corpus:
             return []
 
-        tokenized_query = self._tokenize(query)
+        tokenized_query = Tokenizer.tokenize(query)
+        if not tokenized_query:
+            return []
+
         scores = self._bm25.get_scores(tokenized_query)
 
-        # 归一化分数
-        max_score = max(scores) if len(scores) > 0 and max(scores) > 0 else 1.0
+        # 归一化
+        max_score = float(max(scores)) if len(scores) > 0 and max(scores) > 0 else 1.0
         normalized = scores / max_score
 
         # 排序取 top_k
@@ -74,21 +201,26 @@ class BM25Index:
 
         return [(doc_id, float(score)) for doc_id, score in ranked]
 
-    @staticmethod
-    def _tokenize(text: str) -> List[str]:
-        """中文分词"""
-        try:
-            import jieba
-            return list(jieba.cut(text))
-        except ImportError:
-            # 回退：按字符分词
-            return list(text)
+    def remove_document(self, doc_id: str):
+        """移除文档"""
+        if doc_id not in self.doc_ids:
+            return
+        idx = self.doc_ids.index(doc_id)
+        self.doc_ids.pop(idx)
+        self.corpus.pop(idx)
+        self._dirty = True
+        logger.debug(f"BM25 移除文档: {doc_id}")
 
+    @property
+    def document_count(self) -> int:
+        return len(self.doc_ids)
+
+
+# ─── LanceDB 向量存储（持久化）───────────────────────────────────
 
 class LanceDBStore:
     """
-    LanceDB 向量存储封装。
-    提供向量索引的创建、写入和搜索。
+    LanceDB 向量存储封装 — 支持持久化和表管理。
     """
 
     def __init__(self, db_path: str = None):
@@ -97,27 +229,34 @@ class LanceDBStore:
             from app.core.config import config
             db_path = os.path.join(config.DATA_DIR, "lancedb")
         os.makedirs(db_path, exist_ok=True)
+        self.db_path = db_path
         self.db = lancedb.connect(db_path)
         self._table = None
+        self._table_name = "chunks"
 
     def create_or_open_table(self, table_name: str = "chunks"):
-        """创建或打开表"""
+        """创建或打开表（自动发现已有表）"""
+        self._table_name = table_name
         try:
             self._table = self.db.open_table(table_name)
-            logger.info(f"LanceDB 表已打开: {table_name}")
+            count = self._table.count_rows() if hasattr(self._table, 'count_rows') else "?"
+            logger.info(f"LanceDB 表已打开: {table_name} (rows={count})")
         except Exception:
             self._table = None
             logger.info(f"LanceDB 表不存在，将在首次写入时创建: {table_name}")
 
     def add(self, chunks: List[dict], embeddings: List[List[float]]):
         """
-        批量添加向量
+        批量添加向量记录。
 
         Args:
             chunks: 文档块列表（含 id, text, parent_id 等）
             embeddings: 对应的向量列表
         """
         import pyarrow as pa
+
+        if not chunks:
+            return
 
         records = []
         for chunk, vec in zip(chunks, embeddings):
@@ -131,18 +270,18 @@ class LanceDBStore:
             })
 
         if self._table is None:
-            self._table = self.db.create_table("chunks", records)
-            logger.info(f"LanceDB 表创建完成: {len(records)} 条记录")
+            self._table = self.db.create_table(self._table_name, records)
+            logger.info(f"LanceDB 表创建完成: {self._table_name}, {len(records)} 条记录")
         else:
             self._table.add(records)
-            logger.info(f"LanceDB 添加 {len(records)} 条向量记录")
+            logger.info(f"LanceDB 添加 {len(records)} 条向量记录到 {self._table_name}")
 
     def search(self, query_vector: List[float], top_k: int = 20) -> List[dict]:
         """
-        向量检索
+        向量检索。
 
         Returns:
-            [{"id": ..., "text": ..., "score": ..., "parent_id": ...}, ...]
+            [{"id": ..., "text": ..., "_distance": ..., "parent_id": ..., ...}, ...]
         """
         if self._table is None:
             return []
@@ -154,21 +293,68 @@ class LanceDBStore:
             logger.error(f"LanceDB 搜索失败: {e}")
             return []
 
+    def get_all_chunks(self) -> List[dict]:
+        """获取所有已索引的块"""
+        if self._table is None:
+            return []
+        try:
+            return self._table.to_list()
+        except Exception as e:
+            logger.error(f"LanceDB 读取全部数据失败: {e}")
+            return []
+
+    def remove_by_doc_id(self, doc_id: str):
+        """删除指定文档的所有块"""
+        if self._table is None:
+            return
+        try:
+            self._table.delete(f"doc_id = '{doc_id}'")
+            logger.info(f"LanceDB 删除文档块: {doc_id}")
+        except Exception as e:
+            logger.warning(f"LanceDB 删除失败: {e}")
+
+    def compact(self):
+        """压缩表文件"""
+        if self._table is not None:
+            try:
+                self._table.compact_files()
+                logger.info("LanceDB 表压缩完成")
+            except Exception as e:
+                logger.debug(f"LanceDB compact 跳过: {e}")
+
+    @property
+    def count(self) -> int:
+        if self._table is None:
+            return 0
+        try:
+            return self._table.count_rows()
+        except Exception:
+            return len(self._table.to_list())
+
+
+# ─── 混合检索服务 ─────────────────────────────────────────────────
 
 class HybridSearchService:
     """
-    混合检索服务 - 向量 + BM25 双路并行检索 + RRF 融合
+    混合检索服务 - 向量 + BM25 双路并行检索 + RRF 融合。
+
+    P2 优化：
+    - BM25 增量更新（文档数 > threshold 时增量添加）
+    - LanceDB 持久化路径确认
+    - parent_text 双路查找（向量表 + BM25 文本库）
     """
 
     def __init__(self):
         self.vector_store = LanceDBStore()
         self.bm25_index = BM25Index()
-        self.vector_weight = 0.7   # config.VECTOR_WEIGHT
-        self.bm25_weight = 0.3     # config.BM25_WEIGHT
+        self.vector_weight = 0.7
+        self.bm25_weight = 0.3
+        # 用于 parent_text 查找的完整块缓存
+        self._all_chunks_cache: Dict[str, dict] = {}
 
     def index_document(self, chunks: List[dict], embeddings: List[List[float]]):
         """
-        对新文档建立索引（向量 + BM25）
+        对新文档建立索引（向量 + BM25 增量）。
 
         Args:
             chunks: Chunk 列表
@@ -185,18 +371,32 @@ class HybridSearchService:
         # 向量索引
         self.vector_store.add(chunks, embeddings)
 
-        # BM25 索引：重建整个索引
-        # （简化实现，生产环境应增量更新）
-        all_chunks = []
-        try:
-            existing = self.vector_store._table.to_list() if self.vector_store._table else []
-            for record in existing:
-                all_chunks.append((record["id"], record["text"]))
-        except Exception as e:
-            logger.warning(f"读取已有向量索引时出错（将重建索引）: {e}")
+        # 更新缓存
         for chunk in chunks:
-            all_chunks.append((chunk["id"], chunk["text"]))
-        self.bm25_index.index(all_chunks)
+            self._all_chunks_cache[chunk["id"]] = chunk
+
+        # BM25 增量更新（修复：不再每次全量重建）
+        new_docs = [(chunk["id"], chunk["text"]) for chunk in chunks
+                     if chunk.get("chunk_level") == "child"]
+        if new_docs:
+            current_count = self.bm25_index.document_count
+            if current_count == 0:
+                self.bm25_index.index(new_docs)
+            else:
+                self.bm25_index.add_documents(new_docs)
+
+    def rebuild_index_from_store(self):
+        """从 LanceDB 重建 BM25 索引（服务恢复用）"""
+        all_chunks = self.vector_store.get_all_chunks()
+        if not all_chunks:
+            return
+
+        docs = [(c["id"], c["text"]) for c in all_chunks if c.get("chunk_level") == "child"]
+        self.bm25_index.index(docs)
+
+        # 重建缓存
+        self._all_chunks_cache = {c["id"]: c for c in all_chunks}
+        logger.info(f"从 LanceDB 重建索引: {len(docs)} 子块")
 
     def search(
         self,
@@ -205,7 +405,7 @@ class HybridSearchService:
         top_k: int = 20,
     ) -> List[SearchResult]:
         """
-        混合检索：向量 + BM25 → RRF 融合
+        混合检索：向量 + BM25 → RRF 融合。
 
         Args:
             query: 查询文本
@@ -217,13 +417,23 @@ class HybridSearchService:
         """
         # 1. 向量检索
         vector_results = self.vector_store.search(query_vector, top_k=top_k * 2)
-        vector_scores = {r["id"]: (1.0 - r.get("_distance", 0.0)) for r in vector_results}
+        vector_scores: Dict[str, float] = {}
+        vector_data: Dict[str, dict] = {}
+        for r in vector_results:
+            vid = r["id"]
+            # LanceDB 返回 _distance，转为相似度分数
+            distance = r.get("_distance", 0.0)
+            similarity = 1.0 / (1.0 + distance)  # 距离 → 相似度
+            vector_scores[vid] = similarity
+            vector_data[vid] = r
 
         # 2. BM25 检索
         bm25_results = self.bm25_index.search(query, top_k=top_k * 2)
-        bm25_scores = {doc_id: score for doc_id, score in bm25_results}
+        bm25_scores: Dict[str, float] = {}
+        for doc_id, score in bm25_results:
+            bm25_scores[doc_id] = score
 
-        # 3. RRF (Reciprocal Rank Fusion) 融合
+        # 3. RRF 融合
         all_ids = set(list(vector_scores.keys()) + list(bm25_scores.keys()))
 
         fused = []
@@ -237,25 +447,30 @@ class HybridSearchService:
         fused.sort(key=lambda x: x[1], reverse=True)
         fused = fused[:top_k]
 
-        # 构建 SearchResult
+        # 4. 构建 SearchResult（修复 parent_text 查找）
         results = []
         for chunk_id, score in fused:
-            # 从向量结果获取文本
-            text = ""
-            parent_text = None
-            for r in vector_results:
-                if r["id"] == chunk_id:
-                    text = r.get("text", "")
-                    parent_id = r.get("parent_id", "")
-                    if parent_id:
-                        # 查找父块文本
-                        for pr in vector_results:
-                            if pr["id"] == parent_id:
-                                parent_text = pr.get("text", "")
-                                break
-                    break
+            # 优先从向量结果获取数据
+            data = vector_data.get(chunk_id)
+            if data is None:
+                # BM25 only 的结果：从缓存获取
+                data = self._all_chunks_cache.get(chunk_id, {})
 
-            source = "vector" if chunk_id in vector_scores else "bm25"
+            text = data.get("text", "")
+            parent_text = None
+            parent_id = data.get("parent_id", "")
+
+            if parent_id:
+                # 查找父块文本：先查向量数据，再查缓存
+                parent_data = vector_data.get(parent_id) or self._all_chunks_cache.get(parent_id, {})
+                parent_text = parent_data.get("text", "")
+
+            source = "fusion"
+            if chunk_id in vector_scores and chunk_id not in bm25_scores:
+                source = "vector"
+            elif chunk_id in bm25_scores and chunk_id not in vector_scores:
+                source = "bm25"
+
             results.append(SearchResult(
                 chunk_id=chunk_id,
                 text=text,
@@ -265,3 +480,17 @@ class HybridSearchService:
             ))
 
         return results
+
+    def remove_document(self, doc_id: str):
+        """移除文档的索引"""
+        # 从 LanceDB 移除
+        self.vector_store.remove_by_doc_id(doc_id)
+
+        # 从缓存移除
+        keys_to_remove = [k for k, v in self._all_chunks_cache.items()
+                          if v.get("doc_id") == doc_id]
+        for k in keys_to_remove:
+            self._all_chunks_cache.pop(k, None)
+            self.bm25_index.remove_document(k)
+
+        logger.info(f"已移除文档索引: {doc_id}")

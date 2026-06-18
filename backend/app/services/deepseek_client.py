@@ -149,6 +149,59 @@ class DeepSeekClient:
                 await _async_sleep(2 ** attempt)
 
     @classmethod
+    async def rewrite_query(cls, query: str, num_versions: int = 2) -> List[str]:
+        """
+        使用 LLM 对查询进行多角度改写，用于提升检索召回率。
+
+        Args:
+            query: 原始查询
+            num_versions: 生成改写版本数量 (默认 2)
+
+        Returns:
+            [原始查询, 改写1, 改写2, ...]
+        """
+        if not config.is_api_key_set or not config.ENABLE_QUERY_REWRITING:
+            return [query]
+
+        system_prompt = """你是一位搜索查询改写专家。你的任务是将用户的查询从不同角度改写为 2-3 个版本，以提高检索召回率。
+
+改写角度：
+1. 同义改写：用不同的词汇和句式表达相同的意思
+2. 具体化：将抽象概念展开为更具体的表述
+3. 抽象化：将具体问题提炼为更一般的概念
+
+请以 JSON 数组格式输出改写结果，包含原始查询和改写版本。
+示例输出: ["原始查询", "改写版本1", "改写版本2"]"""
+
+        user_msg = f'请改写以下查询（生成 {num_versions} 个版本）:\n{query}'
+
+        try:
+            result = await cls.chat(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_msg},
+                ],
+                temperature=0.3,
+                max_tokens=512,
+            )
+            content = result.get("content", "[]")
+
+            # 解析 JSON 数组
+            import re
+            arr_match = re.search(r'\[.*?\]', content, re.DOTALL)
+            if arr_match:
+                rewritten = json.loads(arr_match.group(0))
+                if isinstance(rewritten, list) and len(rewritten) > 0:
+                    # 确保包含原始 query
+                    versions = [query] + [v for v in rewritten if v != query]
+                    logger.debug(f"查询改写: {query!r} → {versions}")
+                    return versions[:num_versions + 1]
+        except Exception as e:
+            logger.warning(f"查询改写失败: {e}")
+
+        return [query]
+
+    @classmethod
     async def extract_entities(
         cls,
         text: str,

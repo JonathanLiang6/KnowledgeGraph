@@ -287,8 +287,8 @@ class LanceDBStore:
             return []
 
         try:
-            results = self._table.search(query_vector).limit(top_k).to_list()
-            return results
+            results = self._table.search(query_vector).limit(top_k).to_pandas()
+            return results.to_dict('records')
         except Exception as e:
             logger.error(f"LanceDB 搜索失败: {e}")
             return []
@@ -298,7 +298,7 @@ class LanceDBStore:
         if self._table is None:
             return []
         try:
-            return self._table.to_list()
+            return self._table.to_pandas().to_dict('records')
         except Exception as e:
             logger.error(f"LanceDB 读取全部数据失败: {e}")
             return []
@@ -329,7 +329,7 @@ class LanceDBStore:
         try:
             return self._table.count_rows()
         except Exception:
-            return len(self._table.to_list())
+            return len(self._table.to_pandas())
 
 
 # ─── 混合检索服务 ─────────────────────────────────────────────────

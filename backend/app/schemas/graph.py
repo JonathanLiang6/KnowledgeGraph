@@ -22,6 +22,7 @@ class GraphLink(BaseModel):
     relation: str
     value: float
     sentence: str = ""
+    dashed: bool = False
 
 
 class GraphData(BaseModel):

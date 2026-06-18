@@ -16,6 +16,18 @@
           <el-icon :size="14"><Plus /></el-icon>
           <span class="size-label">节点 {{ Math.round(nodeSizeScale * 100) }}%</span>
         </div>
+        <div class="weight-control">
+          <span class="weight-label">权重 ≥</span>
+          <el-slider
+            v-model="minWeight"
+            :min="0"
+            :max="1"
+            :step="0.05"
+            style="width:80px"
+            @input="onWeightChange"
+          />
+          <span class="size-label">{{ minWeight.toFixed(2) }}</span>
+        </div>
         <button class="btn-secondary btn-sm" @click="resetView">重置视图</button>
         <button class="btn-primary btn-sm" @click="refreshData">刷新数据</button>
       </div>
@@ -24,12 +36,25 @@
     <div class="graph-main">
       <canvas ref="canvasRef" class="graph-canvas" />
 
-      <!-- 图例 -->
+      <!-- 图例 + 类型筛选 -->
       <div class="legend-panel glass-card" v-if="legend && Object.keys(legend).length > 0">
-        <h4>图例</h4>
+        <div class="legend-header">
+          <h4>图例</h4>
+          <div class="legend-toggle">
+            <button class="legend-btn" @click="toggleAllTypes(true)">全选</button>
+            <button class="legend-btn" @click="toggleAllTypes(false)">全不选</button>
+          </div>
+        </div>
         <div v-for="(color, type) in legend" :key="type" class="legend-item">
-          <span class="legend-dot" :style="{ background: color }" />
-          <span>{{ type }}</span>
+          <label class="legend-label" :style="{ opacity: hiddenTypes.has(type) ? 0.4 : 1 }">
+            <input
+              type="checkbox"
+              :checked="!hiddenTypes.has(type)"
+              @change="toggleType(type)"
+            />
+            <span class="legend-dot" :style="{ background: color }" />
+            <span>{{ type }}</span>
+          </label>
         </div>
       </div>
 
@@ -38,11 +63,14 @@
         <h4>图谱统计</h4>
         <div class="stat-row"><span>节点数</span><strong>{{ nodeCount }}</strong></div>
         <div class="stat-row"><span>边数</span><strong>{{ linkCount }}</strong></div>
+        <div class="stat-row" v-if="bridgeCount > 0">
+          <span>虚线桥接</span><strong>{{ bridgeCount }}</strong>
+        </div>
       </div>
 
       <!-- 操作提示 -->
       <div class="hint-bar">
-        <span>🖱 滚轮缩放 &nbsp;|&nbsp; 拖拽平移 &nbsp;|&nbsp; 点击节点查看详情</span>
+        <span>🖱 滚轮缩放 &nbsp;|&nbsp; 拖拽平移 &nbsp;|&nbsp; 点击节点查看详情 &nbsp;|&nbsp; 图例筛选类型</span>
       </div>
     </div>
 
@@ -68,12 +96,18 @@
             </div>
           </div>
           <div class="entity-related" v-if="relatedNodes.length > 0">
-            <h4>关联实体</h4>
-            <div v-for="rn in relatedNodes" :key="rn.id" class="related-item">
+            <h4>关联实体 <span class="related-hint">(点击跳转)</span></h4>
+            <div
+              v-for="rn in relatedNodes"
+              :key="rn.id"
+              class="related-item clickable"
+              @click="navigateToEntity(rn)"
+            >
               <span class="related-dot" :style="{ background: rn.color }" />
               <span class="related-name">{{ rn.name }}</span>
               <span class="related-type">{{ rn.type }}</span>
               <span class="related-rel">{{ rn.relation }}</span>
+              <el-icon class="related-arrow" :size="12"><ArrowRight /></el-icon>
             </div>
           </div>
         </div>
@@ -84,23 +118,26 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, markRaw } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, markRaw, reactive } from 'vue'
 import { useRoute } from 'vue-router'
 import { useGraphRenderer } from '../composables/useGraphRenderer'
-import { getGraphData } from '../api/graph'
+import { getGraphData, getEntityDetail } from '../api/graph'
 import { ElMessage } from 'element-plus'
-import { Minus, Plus } from '@element-plus/icons-vue'
+import { Minus, Plus, ArrowRight } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const canvasRef = ref(null)
 const legend = ref({})
 const nodeCount = ref(0)
 const linkCount = ref(0)
+const bridgeCount = ref(0)
 const nodeSizeScale = ref(0.8)
+const minWeight = ref(0.0)
 const selectedEntity = ref(null)
 const drawerVisible = ref(false)
 const graphWidth = ref(1000)
 const graphHeight = ref(600)
+const hiddenTypes = reactive(new Set())
 
 let renderer = null
 let currentNodeData = []
@@ -127,7 +164,11 @@ const relatedNodes = computed(() => {
     if (otherId) {
       const other = currentNodeData.find(n => n.id === otherId)
       if (other && !result.find(r => r.id === otherId)) {
-        result.push({ ...other, relation: l.relation || '关联' })
+        result.push({
+          ...other,
+          relation: l.relation || '关联',
+          dashed: l.dashed || false,
+        })
       }
     }
   }
@@ -141,8 +182,44 @@ function handleNodeClick(node) {
   }
 }
 
+function navigateToEntity(entity) {
+  if (!renderer || !entity) return
+  // 确保该类型可见
+  if (hiddenTypes.has(entity.type)) {
+    hiddenTypes.delete(entity.type)
+    renderer.setHiddenTypes([...hiddenTypes])
+  }
+  // 居中到目标节点
+  renderer.centerOn(entity)
+  // 更新抽屉内容
+  selectedEntity.value = entity
+  drawerVisible.value = true
+}
+
+function toggleType(type) {
+  if (hiddenTypes.has(type)) {
+    hiddenTypes.delete(type)
+  } else {
+    hiddenTypes.add(type)
+  }
+  if (renderer) renderer.setHiddenTypes([...hiddenTypes])
+}
+
+function toggleAllTypes(show) {
+  if (show) {
+    hiddenTypes.clear()
+  } else {
+    Object.keys(legend.value).forEach(t => hiddenTypes.add(t))
+  }
+  if (renderer) renderer.setHiddenTypes([...hiddenTypes])
+}
+
 function onSizeChange(val) {
   if (renderer) renderer.setNodeSizeScale(val)
+}
+
+function onWeightChange(val) {
+  if (renderer) renderer.setMinWeight(val)
 }
 
 async function refreshData() {
@@ -156,7 +233,12 @@ async function refreshData() {
     currentLinkData = data.links
     nodeCount.value = data.nodes.length
     linkCount.value = data.links.length
+    bridgeCount.value = data.links.filter(l => l.dashed).length
     legend.value = res.legend || {}
+
+    // 重置类型筛选
+    hiddenTypes.clear()
+
     if (renderer) renderer.stop()
     if (canvasRef.value) {
       renderer = useGraphRenderer(canvasRef, graphWidth, graphHeight, handleNodeClick)
@@ -211,7 +293,8 @@ onUnmounted(() => {
   }
 }
 
-.size-control {
+.size-control,
+.weight-control {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
@@ -222,8 +305,14 @@ onUnmounted(() => {
     font-size: 12px;
     color: var(--text-tertiary);
     white-space: nowrap;
-    min-width: 60px;
+    min-width: 36px;
   }
+}
+
+.weight-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
 }
 
 .btn-sm {
@@ -252,11 +341,36 @@ onUnmounted(() => {
   top: var(--spacing-md);
   right: var(--spacing-md);
   padding: var(--spacing-md);
-  min-width: 130px;
-  max-height: 50%;
+  min-width: 140px;
+  max-height: 55%;
   overflow-y: auto;
+  z-index: 10;
 
-  h4 { font-size: 13px; margin-bottom: var(--spacing-sm); color: var(--text-secondary); }
+  h4 { font-size: 13px; margin: 0; color: var(--text-secondary); }
+
+  .legend-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-sm);
+    gap: var(--spacing-sm);
+  }
+
+  .legend-toggle {
+    display: flex;
+    gap: 2px;
+  }
+
+  .legend-btn {
+    font-size: 10px;
+    padding: 1px 6px;
+    border: 1px solid var(--border-light);
+    border-radius: 3px;
+    background: var(--bg-page);
+    color: var(--text-tertiary);
+    cursor: pointer;
+    &:hover { color: var(--color-primary); border-color: var(--color-primary); }
+  }
 }
 
 .stats-panel {
@@ -270,12 +384,24 @@ onUnmounted(() => {
 }
 
 .legend-item {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  margin-bottom: 4px;
-  font-size: 12px;
-  color: var(--text-secondary);
+  margin-bottom: 2px;
+
+  .legend-label {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+
+    input[type="checkbox"] {
+      width: 13px;
+      height: 13px;
+      cursor: pointer;
+      accent-color: var(--color-primary);
+    }
+  }
 
   .legend-dot {
     width: 10px;
@@ -342,17 +468,32 @@ onUnmounted(() => {
 
   .entity-related {
     margin-top: var(--spacing-lg);
-    h4 { font-size: 14px; margin-bottom: var(--spacing-md); color: var(--text-secondary); }
+    h4 {
+      font-size: 14px;
+      margin-bottom: var(--spacing-md);
+      color: var(--text-secondary);
+      .related-hint { font-size: 11px; color: var(--text-tertiary); font-weight: 400; }
+    }
 
     .related-item {
       display: flex;
       align-items: center;
       gap: var(--spacing-sm);
-      padding: var(--spacing-sm) 0;
+      padding: var(--spacing-sm);
       border-bottom: 1px solid var(--border-light);
+      border-radius: var(--radius-sm);
+      transition: background 0.15s;
+
+      &.clickable {
+        cursor: pointer;
+        &:hover {
+          background: var(--bg-page);
+          .related-name { color: var(--color-primary); }
+        }
+      }
 
       .related-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-      .related-name { font-weight: 500; flex: 1; }
+      .related-name { font-weight: 500; flex: 1; transition: color 0.15s; }
       .related-type { font-size: 11px; color: var(--text-tertiary); }
       .related-rel {
         font-size: 11px;
@@ -360,6 +501,10 @@ onUnmounted(() => {
         background: var(--bg-page);
         padding: 1px 8px;
         border-radius: var(--radius-full);
+      }
+      .related-arrow {
+        color: var(--text-tertiary);
+        flex-shrink: 0;
       }
     }
   }

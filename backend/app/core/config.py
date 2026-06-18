@@ -143,6 +143,23 @@ class Config:
     ENTITY_WEIGHT_THRESHOLD: float = float(os.getenv("ENTITY_WEIGHT_THRESHOLD", "0.02"))
     MAX_ENTITIES: int = int(os.getenv("MAX_ENTITIES", "30"))
     MAX_RELATIONSHIPS: int = int(os.getenv("MAX_RELATIONSHIPS", "40"))
+    # 孤立节点桥接: 最大虚线边数 = N / BRIDGE_EDGE_DIVISOR
+    BRIDGE_EDGE_DIVISOR: int = int(os.getenv("BRIDGE_EDGE_DIVISOR", "3"))
+    BRIDGE_MIN_SIMILARITY: float = float(os.getenv("BRIDGE_MIN_SIMILARITY", "0.15"))
+
+    # ========================
+    # RAG 增强配置 (v2.2)
+    # ========================
+    # 查询改写开关（默认关闭以节省 LLM 调用）
+    ENABLE_QUERY_REWRITING: bool = os.getenv("ENABLE_QUERY_REWRITING", "false").lower() == "true"
+    # GraphRAG 增强检索：用图谱实体扩展查询
+    ENABLE_GRAPH_RAG: bool = os.getenv("ENABLE_GRAPH_RAG", "true").lower() == "true"
+    GRAPH_RAG_EXPAND_ENTITIES: int = int(os.getenv("GRAPH_RAG_EXPAND_ENTITIES", "3"))
+    # 检索缓存大小（LRU）
+    SEARCH_CACHE_SIZE: int = int(os.getenv("SEARCH_CACHE_SIZE", "128"))
+    SEARCH_CACHE_TTL: int = int(os.getenv("SEARCH_CACHE_TTL", "60"))
+    # 上下文构建
+    CONTEXT_MAX_SOURCES: int = int(os.getenv("CONTEXT_MAX_SOURCES", "8"))
 
     @property
     def is_api_key_set(self) -> bool:

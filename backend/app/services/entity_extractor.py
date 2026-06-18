@@ -10,15 +10,9 @@ import logging
 from typing import List, Dict, Tuple, Optional
 from collections import Counter
 
-logger = logging.getLogger(__name__)
+from app.core.colors import get_color_for_type
 
-# 冷色调配色体系
-COLD_COLOR_PALETTE = [
-    "#4F8CF7", "#5C6BC0", "#26A69A", "#7C5CFC", "#66BB6A",
-    "#42A5F5", "#AB47BC", "#29B6F6", "#9CCC65", "#3F51B5",
-    "#00ACC1", "#8E24AA", "#43A047", "#1E88E5", "#5E35B1",
-    "#00897B", "#3949AB", "#039BE5", "#7CB342", "#6D4C41",
-]
+logger = logging.getLogger(__name__)
 
 # 停用词表（中英文）
 STOP_WORDS = set([
@@ -87,9 +81,9 @@ class NLPEntityExtractor:
             logger.warning(f"jieba 初始化警告: {e}")
 
     def _get_color_for_type(self, entity_type: str) -> str:
-        """为实体类型分配一致的冷色调颜色"""
+        """为实体类型分配一致的颜色（使用统一配色模块）"""
         if entity_type not in self.entity_colors:
-            color = COLD_COLOR_PALETTE[self.color_index % len(COLD_COLOR_PALETTE)]
+            color = get_color_for_type(entity_type, self.color_index)
             self.entity_colors[entity_type] = color
             self.color_index += 1
         return self.entity_colors[entity_type]

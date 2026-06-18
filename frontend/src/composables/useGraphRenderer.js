@@ -1,6 +1,6 @@
 // ============================================================
 // Canvas 图谱渲染器 — D3 力导向布局 + Canvas 2D
-// 节点大小按权重（越核心越大），支持滑块缩放、点击、悬停
+// v2.2: 自适应布局 / 虚线弱关联 / 类型筛选 / centerOn
 // ============================================================
 import * as d3 from 'd3'
 
@@ -10,10 +10,43 @@ export function useGraphRenderer(canvasRef, width, height, onNodeClick) {
   let simulation = null
   let nodes = []
   let links = []
+  let allNodes = []        // 完整节点集（含隐藏的）
+  let allLinks = []        // 完整边集
   let transform = d3.zoomIdentity
   let hoveredNode = null
   let selectedNode = null
   let sizeScale = 1.0
+  let hiddenTypes = new Set()
+  let minWeight = 0.0
+
+  // ─── 布局参数 ──────────────────────────────────────────────
+
+  function adaptiveCharge(nodeCount) {
+    // 节点越多，斥力越强以保持间距
+    if (nodeCount < 15) return -300
+    if (nodeCount < 30) return -400
+    if (nodeCount < 60) return -550
+    return -700
+  }
+
+  function linkDistance(link) {
+    // 弱关联/虚线边用更长的距离
+    if (link.dashed || link.relation === '弱关联') return 180
+    // 强关联按权重：高权重更近
+    const v = link.value || 0.5
+    return 60 + (1 - v) * 100
+  }
+
+  function nodeRadius(n) {
+    const base = Math.max(5, Math.min(26, (n.weight || 0.5) * 27))
+    return base * sizeScale
+  }
+
+  function maxNodeRadius() {
+    return 26 * sizeScale
+  }
+
+  // ─── 初始化 ────────────────────────────────────────────────
 
   function init(data, scale = 1.0) {
     if (!canvasRef.value) return
@@ -58,34 +91,112 @@ export function useGraphRenderer(canvasRef, width, height, onNodeClick) {
       }
     })
 
-    // Copy data
-    nodes = data.nodes.map((n, i) => ({
+    // 存储完整数据
+    allNodes = data.nodes.map((n, i) => ({
       ...n,
       x: width.value / 2 + (Math.random() - 0.5) * 200,
       y: height.value / 2 + (Math.random() - 0.5) * 200,
       index: i,
     }))
-    links = data.links.map(l => ({
+
+    allLinks = data.links.map(l => ({
       ...l,
-      source: nodes.find(n => n.id === l.source) || l.source,
-      target: nodes.find(n => n.id === l.target) || l.target,
+      source: allNodes.find(n => n.id === l.source) || l.source,
+      target: allNodes.find(n => n.id === l.target) || l.target,
     }))
 
-    // Force simulation only
-    simulation = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink(links).id(d => d.id).distance(100))
-      .force('charge', d3.forceManyBody().strength(-350))
-      .force('center', d3.forceCenter(width.value / 2, height.value / 2))
-      .force('collision', d3.forceCollide(28))
-      .on('tick', draw)
+    applyFilters()
+    startSimulation()
   }
+
+  function applyFilters() {
+    // 按类型和权重过滤可见节点
+    const visibleNodes = allNodes.filter(n => {
+      if (hiddenTypes.has(n.type)) return false
+      if ((n.weight || 0) < minWeight) return false
+      return true
+    })
+    const visibleNodeIds = new Set(visibleNodes.map(n => n.id))
+
+    nodes = visibleNodes
+    links = allLinks.filter(l => {
+      const sid = typeof l.source === 'object' ? l.source.id : l.source
+      const tid = typeof l.target === 'object' ? l.target.id : l.target
+      return visibleNodeIds.has(sid) && visibleNodeIds.has(tid)
+    })
+  }
+
+  function startSimulation() {
+    if (simulation) simulation.stop()
+
+    const collideR = Math.max(10, maxNodeRadius() * 1.5)
+
+    simulation = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(links).id(d => d.id).distance(l => linkDistance(l)))
+      .force('charge', d3.forceManyBody().strength(adaptiveCharge(nodes.length)))
+      .force('center', d3.forceCenter(width.value / 2, height.value / 2))
+      .force('collision', d3.forceCollide(collideR))
+      .on('tick', draw)
+
+    // 按类型分组力 (可选)
+    const types = [...new Set(nodes.map(n => n.type))]
+    if (types.length >= 2 && types.length <= 6) {
+      const radius = Math.min(width.value, height.value) * 0.35
+      types.forEach((t, i) => {
+        const angle = (2 * Math.PI * i) / types.length
+        const cx = width.value / 2 + radius * Math.cos(angle)
+        const cy = height.value / 2 + radius * Math.sin(angle)
+        simulation.force(`x_${t}`, d3.forceX(cx).strength(0.03))
+        simulation.force(`y_${t}`, d3.forceY(cy).strength(0.03))
+      })
+    }
+  }
+
+  // ─── 公共控制方法 ───────────────────────────────────────────
 
   function setNodeSizeScale(s) {
     sizeScale = s
-    if (simulation) simulation.alpha(0.3).restart()
+    if (simulation) {
+      // 更新碰撞半径
+      const collideR = Math.max(10, maxNodeRadius() * 1.5)
+      simulation.force('collision', d3.forceCollide(collideR))
+      simulation.alpha(0.3).restart()
+    }
   }
 
-  // ---------- helpers ----------
+  function setHiddenTypes(types) {
+    hiddenTypes = new Set(types)
+    applyFilters()
+    startSimulation()
+  }
+
+  function setMinWeight(w) {
+    minWeight = w
+    applyFilters()
+    startSimulation()
+  }
+
+  function centerOn(node) {
+    if (!node || !canvas) return
+    selectedNode = node
+
+    const targetX = node.x
+    const targetY = node.y
+    const tx = width.value / 2 - targetX * transform.k
+    const ty = height.value / 2 - targetY * transform.k
+
+    d3.select(canvas)
+      .transition()
+      .duration(500)
+      .call(
+        d3.zoom().transform,
+        d3.zoomIdentity.translate(tx, ty).scale(Math.max(0.5, transform.k))
+      )
+
+    draw()
+  }
+
+  // ─── 碰撞检测 ──────────────────────────────────────────────
 
   function hitTest(mx, my) {
     for (let i = nodes.length - 1; i >= 0; i--) {
@@ -98,13 +209,7 @@ export function useGraphRenderer(canvasRef, width, height, onNodeClick) {
     return null
   }
 
-  function nodeRadius(n) {
-    // 权重 0.95→~25px，权重 0.5→~13px，默认80%缩放后核心节点≈20px
-    const base = Math.max(5, Math.min(26, (n.weight || 0.5) * 27))
-    return base * sizeScale
-  }
-
-  // ---------- draw ----------
+  // ─── 绘制 ──────────────────────────────────────────────────
 
   function draw() {
     if (!ctx || !canvas) return
@@ -115,7 +220,7 @@ export function useGraphRenderer(canvasRef, width, height, onNodeClick) {
     ctx.translate(transform.x, transform.y)
     ctx.scale(transform.k, transform.k)
 
-    // ---- links ----
+    // ---- 边 (按虚线/实线分组渲染) ----
     for (const l of links) {
       const sx = l.source?.x
       const sy = l.source?.y
@@ -125,34 +230,53 @@ export function useGraphRenderer(canvasRef, width, height, onNodeClick) {
 
       const hl = hoveredNode && (l.source === hoveredNode || l.target === hoveredNode)
       const sl = selectedNode && (l.source === selectedNode || l.target === selectedNode)
+      const isDashed = l.dashed || l.relation === '弱关联'
 
       ctx.beginPath()
       ctx.moveTo(sx, sy)
       ctx.lineTo(tx, ty)
-      ctx.strokeStyle = sl ? '#4F8CF7' : hl ? '#7CABFF' : '#D0D8E8'
-      ctx.lineWidth = (hl || sl) ? 2.0 : Math.max(0.6, (l.value || 0.5) * 1.4)
+
+      if (isDashed) {
+        // 虚线弱关联边
+        ctx.setLineDash([4, 6])
+        ctx.strokeStyle = sl ? '#4F8CF7' : hl ? '#B0BEC5' : '#D0D8E8'
+        ctx.lineWidth = sl ? 1.5 : 0.8
+        ctx.globalAlpha = sl ? 0.9 : (hl ? 0.6 : 0.35)
+      } else {
+        ctx.setLineDash([])
+        ctx.strokeStyle = sl ? '#4F8CF7' : hl ? '#7CABFF' : '#C0C8D8'
+        ctx.lineWidth = (hl || sl) ? 2.0 : Math.max(0.6, (l.value || 0.5) * 1.4)
+        ctx.globalAlpha = 1.0
+      }
+
       ctx.stroke()
 
-      // 关系标签（缩放 > 0.4 或高亮时显示）
-      if (transform.k > 0.4 && (hl || sl || transform.k > 0.7)) {
+      // 关系标签（缩放 > 0.45 或高亮时显示；弱关联在更高缩放时才显示）
+      const labelThreshold = isDashed ? 0.65 : 0.45
+      if (transform.k > labelThreshold && (hl || sl || transform.k > (isDashed ? 0.85 : 0.7))) {
         const mx = (sx + tx) / 2
         const my = (sy + ty) / 2
-        ctx.fillStyle = hl ? '#4F8CF7' : '#8B95A8'
+        ctx.fillStyle = isDashed ? '#B0BEC5' : (hl ? '#4F8CF7' : '#8B95A8')
+        ctx.globalAlpha = isDashed ? 0.6 : 1.0
         const fs = Math.max(10, 11 / transform.k)
         ctx.font = `${fs}px -apple-system, "PingFang SC", sans-serif`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'bottom'
-        ctx.fillText(l.relation || '', mx, my - 4)
+        const label = l.relation || ''
+        if (label) ctx.fillText(label, mx, my - 4)
       }
+
+      ctx.setLineDash([])
+      ctx.globalAlpha = 1.0
     }
 
-    // ---- nodes ----
+    // ---- 节点 ----
     for (const n of nodes) {
       const r = nodeRadius(n)
       const isHovered = n === hoveredNode
       const isSelected = n === selectedNode
 
-      // 发光晕
+      // 发光晕（选中/悬停时）
       if (isHovered || isSelected) {
         ctx.beginPath()
         ctx.arc(n.x, n.y, r + 8, 0, Math.PI * 2)
@@ -160,11 +284,9 @@ export function useGraphRenderer(canvasRef, width, height, onNodeClick) {
         ctx.fill()
       }
 
-      // 圆形节点（纯二维扁平风格）
+      // 圆形节点
       ctx.beginPath()
       ctx.arc(n.x, n.y, r, 0, Math.PI * 2)
-
-      // 纯二维扁平圆形
       ctx.fillStyle = n.color || '#4F8CF7'
       ctx.fill()
 
@@ -201,5 +323,8 @@ export function useGraphRenderer(canvasRef, width, height, onNodeClick) {
     if (ctx) { ctx.scale(dpr, dpr); draw() }
   }
 
-  return { init, stop, resize, draw, setNodeSizeScale }
+  return {
+    init, stop, resize, draw,
+    setNodeSizeScale, setHiddenTypes, setMinWeight, centerOn,
+  }
 }

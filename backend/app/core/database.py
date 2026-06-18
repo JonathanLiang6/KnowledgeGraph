@@ -3,10 +3,13 @@
 v2.1: 连接池配置、Alembic 迁移支持
 """
 import os
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import StaticPool
 from app.core.config import config
+
+logger = logging.getLogger(__name__)
 
 
 # 确保数据目录存在
@@ -67,15 +70,32 @@ async def get_db() -> AsyncSession:
 
 async def init_db():
     """
-    初始化数据库 - 创建所有表并启用 SQLite WAL 模式。
-    v2.4: WAL 模式提升 SQLite 并发读写性能。
+    初始化数据库 - 创建所有表 + 迁移 (v2.4: WAL模式 + file_hash列迁移)。
+
+    生产环境建议使用 Alembic 迁移。
     """
     async with engine.begin() as conn:
+        # 创建新表
         await conn.run_sync(Base.metadata.create_all)
+
+        # WAL 模式
         if _is_sqlite:
             await conn.run_sync(
                 lambda sync_conn: sync_conn.exec_driver_sql("PRAGMA journal_mode=WAL")
             )
+
+        # v2.4: 迁移 — 为已有 documents 表添加 file_hash 列
+        if _is_sqlite:
+            try:
+                await conn.run_sync(
+                    lambda sync_conn: sync_conn.exec_driver_sql(
+                        "ALTER TABLE documents ADD COLUMN file_hash VARCHAR(64)"
+                    )
+                )
+                logger.info("数据库迁移: 已添加 documents.file_hash 列")
+            except Exception:
+                # 列已存在，忽略
+                pass
 
 
 async def close_db():

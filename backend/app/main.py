@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # ─── 启动 ───────────────────────────────────────────────
     logger.info("=" * 50)
-    logger.info("🚀 KnowledgeGraph v2.1 启动中...")
+    logger.info("🚀 KnowledgeGraph v2.4 启动中...")
     logger.info(f"   DeepSeek API: {config.DEEPSEEK_API_BASE}")
     logger.info(f"   Chat Model: {config.DEEPSEEK_CHAT_MODEL}")
     logger.info(f"   Embedding Model: {config.EMBEDDING_MODEL}")
@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # ─── 关闭 ───────────────────────────────────────────────
-    logger.info("🛑 KnowledgeGraph v2.1 关闭中...")
+    logger.info("🛑 KnowledgeGraph v2.4 关闭中...")
     await close_db()
     logger.info("✅ 数据库连接已关闭")
 

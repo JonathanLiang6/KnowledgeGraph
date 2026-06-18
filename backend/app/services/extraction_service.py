@@ -68,7 +68,7 @@ class ExtractionService:
                 "target": r["target"],
                 "relation": r["relation"],
                 "value": r["value"],
-                "sentence": r.get("sentence", "")[:200],
+                "sentence": (r.get("sentence") or "")[:200],  # v2.5: None-safe
             }
             for r in relationships
         ]
@@ -107,7 +107,9 @@ class ExtractionService:
         filtered_rels = []
         for rel in relationships:
             if rel["source"] in entity_map and rel["target"] in entity_map:
-                if rel.get("value", 0.5) >= 0.1:  # 过滤极低权重关系
+                # v2.5: None-safe value check
+                rel_value = rel.get("value")
+                if rel_value is None or rel_value >= 0.1:
                     filtered_rels.append(rel)
 
         filtered_entities = list(entity_map.values())

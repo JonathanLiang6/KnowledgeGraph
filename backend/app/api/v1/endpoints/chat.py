@@ -73,7 +73,8 @@ async def chat_completions(
 
     if request.stream:
         return StreamingResponse(
-            _stream_response(chat_id, request.model, messages),
+            _stream_response(chat_id, request.model, messages,
+                           request.temperature, request.max_tokens),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -104,7 +105,8 @@ async def chat_completions(
         )
 
 
-async def _stream_response(chat_id: str, model: str, messages: List[dict]):
+async def _stream_response(chat_id: str, model: str, messages: List[dict],
+                         temperature: float = None, max_tokens: int = None):
     """SSE 流式响应生成器"""
     try:
         # 发送首帧
@@ -112,7 +114,11 @@ async def _stream_response(chat_id: str, model: str, messages: List[dict]):
 
         # 流式生成内容
         full_content = ""
-        async for chunk in DeepSeekClient.chat_stream(messages=messages):
+        async for chunk in DeepSeekClient.chat_stream(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        ):
             full_content += chunk
             yield f"data: {json.dumps({'id': chat_id, 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': model, 'choices': [{'index': 0, 'delta': {'content': chunk}, 'finish_reason': None}]})}\n\n"
 
@@ -133,11 +139,11 @@ async def _build_rag_messages(
     db: AsyncSession,
 ) -> List[dict]:
     """
-    构建 RAG 增强的消息列表。
+    构建 RAG 增强的消息列表 (v2.3: 实现真正的混合检索上下文)。
+
     根据 model 选择检索策略：
     - rag-local: 仅向量检索
     - rag-hybrid: 向量 + BM25 + 重排序
-    （详细实现在 Phase 3 完成，此处为简化版）
     """
     # 获取最后的用户消息
     user_query = ""
@@ -146,42 +152,67 @@ async def _build_rag_messages(
             user_query = msg.content
             break
 
-    # 检索相关文档块（简化版，Phase 3 实现完整的混合检索）
-    context_parts = []
-    try:
-        # 查询该知识库下的已处理文档
-        result = await db.execute(
-            select(Document).where(
-                Document.kb_id == kb_id,
-                Document.status == "done",
-            )
-        )
-        docs = result.scalars().all()
+    if not user_query:
+        return [m.model_dump() for m in messages]
 
-        if docs:
-            context_parts.append("## 知识库相关内容\n")
-            for doc in docs[:3]:  # 最多3篇文档
-                context_parts.append(f"### 来自文档《{doc.filename}》\n")
-                # 这里后续会替换为实际的 chunk 检索结果
-                context_parts.append(f"(文档包含 {doc.chunk_count} 个知识块，{doc.entity_count} 个实体)\n")
+    # v2.3: 执行真正的混合检索
+    context_text = ""
+    try:
+        from app.services.rag_service import RAGService
+
+        use_rerank = (model == "rag-hybrid")
+        search_results = await RAGService.search_async(
+            query=user_query,
+            top_k=config.HYBRID_SEARCH_TOP_K,
+            use_rerank=use_rerank,
+        )
+
+        if search_results:
+            context_text = RAGService.build_context(
+                search_results,
+                max_tokens=3000,  # v2.4: 默认上下文 token 上限
+                max_sources=config.CONTEXT_MAX_SOURCES,
+            )
+            logger.info(
+                f"RAG 检索完成: query={user_query[:50]}..., "
+                f"results={len(search_results)}"
+            )
+        else:
+            # 回退: 查找知识库文档元数据
+            result = await db.execute(
+                select(Document).where(
+                    Document.kb_id == kb_id,
+                    Document.status == "done",
+                )
+            )
+            docs = result.scalars().all()
+            if docs:
+                parts = ["## 知识库相关内容 (文档摘要)\n"]
+                for doc in docs[:3]:
+                    parts.append(
+                        f"### 来自文档《{doc.filename}》\n"
+                        f"(文档包含 {doc.chunk_count} 个知识块，{doc.entity_count} 个实体)\n"
+                    )
+                context_text = "\n".join(parts)
 
     except Exception as e:
-        logger.warning(f"RAG 检索失败: {e}")
-
-    context = "\n".join(context_parts) if context_parts else ""
+        logger.warning(f"RAG 检索失败, 回退到纯对话模式: {e}")
+        context_text = ""
 
     # 构建 system prompt
-    system_msg = {
-        "role": "system",
-        "content": f"""你是教学知识库问答助手。请基于以下知识库内容回答用户问题。
-
-{context}
-
-要求：
-1. 回答基于提供的知识内容，如果知识库中没有相关信息，请诚实说明
-2. 引用来源时标注文档名
-3. 回答简洁准确，适合教学场景
-4. 对于复杂概念，给出逐步解释""",
-    }
-
-    return [system_msg] + [m.model_dump() for m in messages]
+    if context_text:
+        system_msg = {
+            "role": "system",
+            "content": (
+                "你是教学知识库问答助手。请基于以下知识库内容回答用户问题。\n\n"
+                f"{context_text}\n\n"
+                "要求：\n"
+                "1. 回答基于提供的知识内容，如果知识库中没有相关信息，请诚实说明\n"
+                "2. 引用来源时标注文档名\n"
+                "3. 回答简洁准确，适合教学场景\n"
+                "4. 对于复杂概念，给出逐步解释"
+            ),
+        }
+        return [system_msg] + [m.model_dump() for m in messages]
+    else:
+        return [m.model_dump() for m in messages]

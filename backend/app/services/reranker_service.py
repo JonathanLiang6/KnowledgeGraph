@@ -1,20 +1,27 @@
 """
 重排序服务 - 使用 BGE-Reranker (Cross-Encoder) 对检索结果二次打分
+v2.4: 线程安全的延迟加载
 """
+import threading
 import logging
 from typing import List
 from app.core.config import config
 
 logger = logging.getLogger(__name__)
 
-# 延迟加载
+# 延迟加载 (v2.4: 线程安全)
 _reranker_model = None
+_reranker_lock = threading.Lock()
 
 
 def _get_reranker():
-    """懒加载 Cross-Encoder 模型"""
+    """懒加载 Cross-Encoder 模型 (v2.4: 带锁保护)"""
     global _reranker_model
-    if _reranker_model is None:
+    if _reranker_model is not None:
+        return _reranker_model
+    with _reranker_lock:
+        if _reranker_model is not None:
+            return _reranker_model
         try:
             from sentence_transformers import CrossEncoder
             logger.info(f"加载本地 Reranker 模型: {config.RERANKER_MODEL}")
@@ -97,8 +104,8 @@ class RerankerService:
 
         for chunk in chunks:
             similarity = calculate_similarity(query, chunk.get("text", ""))
-            # 结合原始检索分数
-            original_score = chunk.get("score", chunk.get("_distance", 0))
+            # 结合原始检索分数 (v2.4: 移除易误解的 _distance 回退)
+            original_score = chunk.get("score", 0)
             chunk["rerank_score"] = 0.5 * similarity + 0.5 * original_score
 
         chunks.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)

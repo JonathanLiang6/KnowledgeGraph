@@ -1,13 +1,37 @@
 """
 核心配置模块 - 所有配置从 .env 读取，前端不可见 API 密钥
+v2.4: 安全的 env var 解析 + set 类型优化
 """
 import os
+import logging
 from pathlib import Path
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # 加载项目根目录的 .env 文件
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BASE_DIR / ".env")
+
+
+def _safe_int(key: str, default: str) -> int:
+    """安全解析 int 环境变量，格式错误时回退到默认值并警告"""
+    val = os.getenv(key, default)
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        logger.warning(f"环境变量 {key}={val!r} 不是有效的整数，使用默认值 {default}")
+        return int(default)
+
+
+def _safe_float(key: str, default: str) -> float:
+    """安全解析 float 环境变量，格式错误时回退到默认值并警告"""
+    val = os.getenv(key, default)
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        logger.warning(f"环境变量 {key}={val!r} 不是有效的浮点数，使用默认值 {default}")
+        return float(default)
 
 
 class Config:
@@ -17,7 +41,7 @@ class Config:
     # 服务器配置
     # ========================
     SERVER_HOST: str = os.getenv("SERVER_HOST", "0.0.0.0")
-    SERVER_PORT: int = int(os.getenv("SERVER_PORT", "8013"))
+    SERVER_PORT: int = _safe_int("SERVER_PORT", "8013")
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
     # ========================
@@ -32,8 +56,8 @@ class Config:
     # ========================
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
     EMBEDDING_DEVICE: str = os.getenv("EMBEDDING_DEVICE", "cpu")
-    EMBEDDING_DIM: int = int(os.getenv("EMBEDDING_DIM", "512"))
-    EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
+    EMBEDDING_DIM: int = _safe_int("EMBEDDING_DIM", "512")
+    EMBEDDING_BATCH_SIZE: int = _safe_int("EMBEDDING_BATCH_SIZE", "32")
 
     # ========================
     # Reranker 模型配置 (本地 BGE)
@@ -44,9 +68,9 @@ class Config:
     # ========================
     # LLM 参数
     # ========================
-    LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "4096"))
-    LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.0"))
-    LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "3"))
+    LLM_MAX_TOKENS: int = _safe_int("LLM_MAX_TOKENS", "4096")
+    LLM_TEMPERATURE: float = _safe_float("LLM_TEMPERATURE", "0.0")
+    LLM_MAX_RETRIES: int = _safe_int("LLM_MAX_RETRIES", "3")
 
     # ========================
     # GraphRAG 配置
@@ -56,22 +80,22 @@ class Config:
     GRAPHRAG_STORAGE_DIR: str = os.getenv("GRAPHRAG_STORAGE_DIR", "inputs/artifacts")
     GRAPHRAG_REPORTING_DIR: str = os.getenv("GRAPHRAG_REPORTING_DIR", "inputs/reports")
     GRAPHRAG_PROMPTS_DIR: str = os.getenv("GRAPHRAG_PROMPTS_DIR", "prompts")
-    COMMUNITY_LEVEL: int = int(os.getenv("COMMUNITY_LEVEL", "2"))
+    COMMUNITY_LEVEL: int = _safe_int("COMMUNITY_LEVEL", "2")
 
     # ========================
     # 分块参数
     # ========================
-    CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "800"))
-    CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "50"))
-    PARENT_CHUNK_SIZE: int = int(os.getenv("PARENT_CHUNK_SIZE", "800"))
-    CHILD_CHUNK_SIZE: int = int(os.getenv("CHILD_CHUNK_SIZE", "200"))
+    CHUNK_SIZE: int = _safe_int("CHUNK_SIZE", "800")
+    CHUNK_OVERLAP: int = _safe_int("CHUNK_OVERLAP", "50")
+    PARENT_CHUNK_SIZE: int = _safe_int("PARENT_CHUNK_SIZE", "800")
+    CHILD_CHUNK_SIZE: int = _safe_int("CHILD_CHUNK_SIZE", "200")
 
     # ========================
     # 文件上传限制 (P0 安全加固)
     # ========================
-    MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
+    MAX_FILE_SIZE_MB: int = _safe_int("MAX_FILE_SIZE_MB", "50")
     MAX_FILE_SIZE_BYTES: int = MAX_FILE_SIZE_MB * 1024 * 1024
-    ALLOWED_MIME_TYPES: list = [
+    ALLOWED_MIME_TYPES: set = {
         "text/plain",
         "text/markdown",
         "text/x-markdown",
@@ -80,7 +104,7 @@ class Config:
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "text/html",
         "application/epub+zip",
-    ]
+    }
     ALLOWED_EXTENSIONS: set = {
         ".txt", ".md", ".markdown", ".pdf", ".docx", ".pptx", ".html", ".htm", ".epub",
     }
@@ -90,19 +114,16 @@ class Config:
     # ========================
     # 并发控制 (P1 流水线重构)
     # ========================
-    MAX_CONCURRENT_DOCUMENT_PROCESSING: int = int(os.getenv("MAX_CONCURRENT_DOC_PROCESSING", "3"))
-    DOCUMENT_PROCESSING_TIMEOUT_MINUTES: int = int(os.getenv("DOC_PROCESSING_TIMEOUT", "30"))
-    # CPU 密集型任务（Embedding/Reranker）线程池大小
-    CPU_WORKER_THREADS: int = int(os.getenv("CPU_WORKER_THREADS", "2"))
+    MAX_CONCURRENT_DOCUMENT_PROCESSING: int = _safe_int("MAX_CONCURRENT_DOC_PROCESSING", "3")
+    DOCUMENT_PROCESSING_TIMEOUT_MINUTES: int = _safe_int("DOC_PROCESSING_TIMEOUT", "30")
+    CPU_WORKER_THREADS: int = _safe_int("CPU_WORKER_THREADS", "2")
 
     # ========================
     # 检索引擎配置 (P2)
     # ========================
     LANCEDB_PATH: str = os.getenv("LANCEDB_PATH", str(BASE_DIR / "data" / "lancedb"))
-    # 索引自动持久化间隔（秒），0 表示每次写入都持久化
-    INDEX_PERSIST_INTERVAL: int = int(os.getenv("INDEX_PERSIST_INTERVAL", "0"))
-    # BM25 增量更新 vs 全量重建阈值（文档数超过此值启用增量）
-    BM25_INCREMENTAL_THRESHOLD: int = int(os.getenv("BM25_INCREMENTAL_THRESHOLD", "10"))
+    INDEX_PERSIST_INTERVAL: int = _safe_int("INDEX_PERSIST_INTERVAL", "0")
+    BM25_INCREMENTAL_THRESHOLD: int = _safe_int("BM25_INCREMENTAL_THRESHOLD", "10")
 
     # ========================
     # 提示词文件路径
@@ -132,34 +153,29 @@ class Config:
     # ========================
     # 检索配置
     # ========================
-    HYBRID_SEARCH_TOP_K: int = int(os.getenv("HYBRID_SEARCH_TOP_K", "20"))
-    RERANK_TOP_K: int = int(os.getenv("RERANK_TOP_K", "5"))
-    BM25_WEIGHT: float = float(os.getenv("BM25_WEIGHT", "0.3"))
-    VECTOR_WEIGHT: float = float(os.getenv("VECTOR_WEIGHT", "0.7"))
+    HYBRID_SEARCH_TOP_K: int = _safe_int("HYBRID_SEARCH_TOP_K", "20")
+    RERANK_TOP_K: int = _safe_int("RERANK_TOP_K", "5")
+    BM25_WEIGHT: float = _safe_float("BM25_WEIGHT", "0.3")
+    VECTOR_WEIGHT: float = _safe_float("VECTOR_WEIGHT", "0.7")
 
     # ========================
     # 知识图谱配置
     # ========================
-    ENTITY_WEIGHT_THRESHOLD: float = float(os.getenv("ENTITY_WEIGHT_THRESHOLD", "0.02"))
-    MAX_ENTITIES: int = int(os.getenv("MAX_ENTITIES", "30"))
-    MAX_RELATIONSHIPS: int = int(os.getenv("MAX_RELATIONSHIPS", "40"))
-    # 孤立节点桥接: 最大虚线边数 = N / BRIDGE_EDGE_DIVISOR
-    BRIDGE_EDGE_DIVISOR: int = int(os.getenv("BRIDGE_EDGE_DIVISOR", "3"))
-    BRIDGE_MIN_SIMILARITY: float = float(os.getenv("BRIDGE_MIN_SIMILARITY", "0.15"))
+    ENTITY_WEIGHT_THRESHOLD: float = _safe_float("ENTITY_WEIGHT_THRESHOLD", "0.02")
+    MAX_ENTITIES: int = _safe_int("MAX_ENTITIES", "30")
+    MAX_RELATIONSHIPS: int = _safe_int("MAX_RELATIONSHIPS", "40")
+    BRIDGE_EDGE_DIVISOR: int = _safe_int("BRIDGE_EDGE_DIVISOR", "3")
+    BRIDGE_MIN_SIMILARITY: float = _safe_float("BRIDGE_MIN_SIMILARITY", "0.15")
 
     # ========================
     # RAG 增强配置 (v2.2)
     # ========================
-    # 查询改写开关（默认关闭以节省 LLM 调用）
     ENABLE_QUERY_REWRITING: bool = os.getenv("ENABLE_QUERY_REWRITING", "false").lower() == "true"
-    # GraphRAG 增强检索：用图谱实体扩展查询
     ENABLE_GRAPH_RAG: bool = os.getenv("ENABLE_GRAPH_RAG", "true").lower() == "true"
-    GRAPH_RAG_EXPAND_ENTITIES: int = int(os.getenv("GRAPH_RAG_EXPAND_ENTITIES", "3"))
-    # 检索缓存大小（LRU）
-    SEARCH_CACHE_SIZE: int = int(os.getenv("SEARCH_CACHE_SIZE", "128"))
-    SEARCH_CACHE_TTL: int = int(os.getenv("SEARCH_CACHE_TTL", "60"))
-    # 上下文构建
-    CONTEXT_MAX_SOURCES: int = int(os.getenv("CONTEXT_MAX_SOURCES", "8"))
+    GRAPH_RAG_EXPAND_ENTITIES: int = _safe_int("GRAPH_RAG_EXPAND_ENTITIES", "3")
+    SEARCH_CACHE_SIZE: int = _safe_int("SEARCH_CACHE_SIZE", "128")
+    SEARCH_CACHE_TTL: int = _safe_int("SEARCH_CACHE_TTL", "60")
+    CONTEXT_MAX_SOURCES: int = _safe_int("CONTEXT_MAX_SOURCES", "8")
 
     @property
     def is_api_key_set(self) -> bool:

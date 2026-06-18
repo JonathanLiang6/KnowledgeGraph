@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class DocumentResponse(BaseModel):
-    """文档响应"""
+    """文档响应 (v2.4: +graph_data)"""
     id: str
     kb_id: str
     filename: str
@@ -21,11 +21,20 @@ class DocumentResponse(BaseModel):
     chunk_count: int
     entity_count: int
     relationship_count: int
-    error_message: str
+    error_message: str = ""
+    graph_data: Optional[dict] = None
     created_at: datetime
     processed_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def coerce_status(cls, v):
+        """将 DocumentStatus 枚举转为字符串"""
+        if hasattr(v, "value"):
+            return v.value
+        return str(v) if v is not None else "unknown"
 
 
 class DocumentBriefResponse(BaseModel):
@@ -39,7 +48,7 @@ class DocumentBriefResponse(BaseModel):
     progress: float
     entity_count: int
     relationship_count: int
-    error_message: str
+    error_message: str = ""
     created_at: datetime
     processed_at: Optional[datetime] = None
 

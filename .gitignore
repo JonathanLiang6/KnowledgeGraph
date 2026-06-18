@@ -100,6 +100,7 @@ dist-ssr/
 .cache/
 .pytest_cache/
 .mypy_cache/
+backend/cache/
 
 # ------------------------------------------
 # Testing

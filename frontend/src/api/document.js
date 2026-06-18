@@ -13,6 +13,19 @@ export function uploadDocument(formData) {
   return api.post('/documents/upload', formData)
 }
 
+export function uploadDocumentsBatch(formData) {
+  // 批量上传 (v2.5: 支持多文件批量上传)
+  return api.post('/documents/upload/batch', formData)
+}
+
 export function deleteDocument(id) {
   return api.delete(`/documents/${id}`)
+}
+
+export function getDocumentStats() {
+  return api.get('/documents/stats/overview')
+}
+
+export function checkDuplicate(fileHash, kbId) {
+  return api.get('/documents/check-duplicate', { params: { file_hash: fileHash, kb_id: kbId } })
 }

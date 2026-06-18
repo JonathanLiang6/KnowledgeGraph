@@ -75,7 +75,13 @@ function formatTime(ts) {
 
 function renderMarkdown(text) {
   if (!text) return ''
-  return marked.parse(text)
+  // v2.4: 基础 XSS 防护 — 移除 script/iframe/on* 事件
+  const sanitized = text
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
+    .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
+  return marked.parse(sanitized)
 }
 
 function scrollToBottom() {

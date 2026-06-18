@@ -124,13 +124,24 @@ async def delete_knowledge_base(kb_id: str, db: AsyncSession = Depends(get_db)):
     if not kb:
         raise HTTPException(status_code=404, detail="知识库不存在")
 
-    # 收集物理文件路径（在级联删除前）
+    # 收集文档ID和文件路径（在级联删除前）
     docs_result = await db.execute(
-        select(Document.file_path).where(Document.kb_id == kb_id)
+        select(Document.id, Document.file_path).where(Document.kb_id == kb_id)
     )
-    file_paths = [fp for (fp,) in docs_result.all() if fp]
+    doc_rows = docs_result.all()
+    doc_ids = [row[0] for row in doc_rows]
+    file_paths = [row[1] for row in doc_rows if row[1]]
 
     kb_name = kb.name
+
+    # v2.5: 先清理检索引擎中的索引 (使用模块级单例)
+    try:
+        from app.services.hybrid_search import hybrid_search_service
+        for doc_id in doc_ids:
+            hybrid_search_service.remove_document(doc_id)
+        logger.info(f"已清理 {len(doc_ids)} 个文档的检索索引")
+    except Exception as e:
+        logger.warning(f"清理检索索引失败（非致命）: {e}")
 
     # 删除 KB（级联删除文档记录）
     await db.delete(kb)

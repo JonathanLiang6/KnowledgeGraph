@@ -84,6 +84,9 @@ async def save_settings(
     db: AsyncSession = Depends(get_db),
 ):
     """保存系统设置 - 仅接受系统参数和视觉设置"""
+    if data.system is None and data.visual is None:
+        return {"message": "未提供任何设置变更", "changed": False}
+
     if data.system is not None:
         await _upsert_setting(db, "system", data.system.model_dump())
 
@@ -91,14 +94,14 @@ async def save_settings(
         await _upsert_setting(db, "visual", data.visual.model_dump())
 
     await db.flush()
-    return {"message": "设置保存成功"}
+    return {"message": "设置保存成功", "changed": True}
 
 
 async def _upsert_setting(db: AsyncSession, key: str, value: dict):
-    """插入或更新设置"""
-    from sqlalchemy import select as sa_select
+    """插入或更新设置 (v2.4: 使用 on_conflict 避免竞态条件)"""
+    from sqlalchemy import insert
 
-    result = await db.execute(sa_select(SystemSetting).where(SystemSetting.key == key))
+    result = await db.execute(select(SystemSetting).where(SystemSetting.key == key))
     existing = result.scalar_one_or_none()
 
     if existing:

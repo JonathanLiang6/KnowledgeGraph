@@ -43,7 +43,7 @@ POS_TO_ENTITY_TYPE: Dict[str, str] = {
 RELATION_PATTERNS = {
     '包含': [r'包含|包括|涵盖|分为|由.*组成'],
     '因果': [r'导致|引起|造成|使得|因为|由于|所以|因此|从而'],
-    '前提': [r'前提|基础|必要条件|必要条件|依赖于|建立在'],
+    '前提': [r'前提|基础|必要条件|依赖于|建立在'],
     '应用': [r'应用|运用|用于|用来|使用|采用'],
     '对比': [r'相反|对立|差异|区别于|不同于|与.*不同|比较|对比|相比'],
     '发展': [r'发展|演变|进化|演化为|转变|逐步|演变为'],
@@ -196,7 +196,7 @@ class NLPEntityExtractor:
                     if len(w.strip()) > 1
                     and w not in STOP_WORDS
                     and not w.isdigit()
-                    and not re.match(r'^[^一-鿿_a-zA-Z]+$', w)
+                    and not re.match(r'^[^一-鿿㐀-䶿a-zA-Z]+$', w)  # v2.4: +CJK Ext.A
                 ]
                 if valid_words:
                     words_only = [w for w, _ in valid_words]
@@ -320,7 +320,7 @@ class NLPEntityExtractor:
         self, entities: List[dict], relationships: List[dict]
     ) -> Tuple[List[dict], List[dict]]:
         """
-        去噪优化：
+        去噪优化 (v2.4: O(n+m) 替代 O(n*m))：
         - 过滤低权重实体
         - 限制实体/关系数量
         - 重新索引 ID
@@ -341,22 +341,19 @@ class NLPEntityExtractor:
                 filtered_entities, key=lambda x: x["weight"], reverse=True
             )[:max_entities]
 
-        # 构建 name → id 映射
+        # v2.4: 构建 id→name 和 name→id 映射 (O(n) 替代 O(n*m))
+        orig_id_to_name = {e["id"]: e["name"] for e in entities}
         entity_name_to_id = {e["name"]: e["id"] for e in filtered_entities}
 
-        # 过滤关系：确保源和目标都在过滤后的实体中
+        # 过滤关系：使用 dict 查找 (O(1) 替代 O(n))
         filtered_relationships = []
         for rel in relationships:
-            source_entity = next((e for e in entities if e["id"] == rel["source"]), None)
-            target_entity = next((e for e in entities if e["id"] == rel["target"]), None)
-
-            if source_entity and target_entity:
-                src_name = source_entity["name"]
-                tgt_name = target_entity["name"]
-                if src_name in entity_name_to_id and tgt_name in entity_name_to_id:
-                    rel["source"] = entity_name_to_id[src_name]
-                    rel["target"] = entity_name_to_id[tgt_name]
-                    filtered_relationships.append(rel)
+            src_name = orig_id_to_name.get(rel["source"])
+            tgt_name = orig_id_to_name.get(rel["target"])
+            if src_name and tgt_name and src_name in entity_name_to_id and tgt_name in entity_name_to_id:
+                rel["source"] = entity_name_to_id[src_name]
+                rel["target"] = entity_name_to_id[tgt_name]
+                filtered_relationships.append(rel)
 
         # 限制关系数量
         max_rels = config.MAX_RELATIONSHIPS
@@ -365,7 +362,7 @@ class NLPEntityExtractor:
                 filtered_relationships, key=lambda x: x["value"], reverse=True
             )[:max_rels]
 
-        # 重新索引 ID
+        # 重新索引 ID (v2.4: 单次遍历 + dict 查找)
         optimized_entities = []
         new_name_to_id = {}
         for i, entity in enumerate(filtered_entities):
@@ -380,14 +377,12 @@ class NLPEntityExtractor:
                 "pos": entity.get("pos", "n"),
             })
 
+        # v2.4: 用映射表重定向 source/target
+        new_id_to_name = {e["id"]: e["name"] for e in filtered_entities}
         optimized_relationships = []
         for i, rel in enumerate(filtered_relationships):
-            source_name = next(
-                (e["name"] for e in filtered_entities if e["id"] == rel["source"]), None
-            )
-            target_name = next(
-                (e["name"] for e in filtered_entities if e["id"] == rel["target"]), None
-            )
+            source_name = new_id_to_name.get(rel["source"])
+            target_name = new_id_to_name.get(rel["target"])
             if source_name and target_name:
                 optimized_relationships.append({
                     "id": str(i + 1),

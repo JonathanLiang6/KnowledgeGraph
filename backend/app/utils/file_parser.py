@@ -53,8 +53,8 @@ def read_file_content(filepath: str) -> Optional[str]:
 
     parser = parsers.get(ext)
     if parser is None:
-        logger.warning(f"不支持的文件类型: {ext}，尝试纯文本读取")
-        return _read_text_with_encoding_detect(filepath)
+        logger.warning(f"不支持的文件类型: {ext}")
+        return None
 
     try:
         return parser(filepath)
@@ -95,25 +95,14 @@ def _read_text_with_encoding_detect(filepath: str) -> str:
     return raw.decode("latin-1", errors="replace")
 
 
-def _read_text(filepath: str) -> str:
-    """读取纯文本文件（UTF-8）"""
-    with open(filepath, "r", encoding="utf-8") as f:
-        return f.read()
-
-
-# ─── PDF（使用 pypdf，替换旧 PyPDF2）──────────────────────────────
+# ─── PDF（使用 pypdf）───────────────────────────────────────────────
 
 
 def _read_pdf(filepath: str) -> str:
     """
-    读取 PDF 文件。
-    使用 pypdf（PyPDF2 的继任者），支持更好的文本提取和错误恢复。
+    读取 PDF 文件 (v2.4: 仅使用 pypdf, 移除已废弃的 PyPDF2 回退)。
     """
-    try:
-        from pypdf import PdfReader
-    except ImportError:
-        # 回退到 PyPDF2
-        from PyPDF2 import PdfReader
+    from pypdf import PdfReader
 
     reader = PdfReader(filepath)
     texts = []
@@ -249,8 +238,13 @@ def _strip_html(html: str) -> str:
 # ─── 文件信息 ─────────────────────────────────────────────────────
 
 
-def get_file_info(filepath: str) -> dict:
-    """获取文件基本信息（含 MIME 检测）"""
+def get_file_info(filepath: str, file_hash: str = None) -> dict:
+    """获取文件基本信息（含 MIME 检测）。
+
+    Args:
+        filepath: 文件路径
+        file_hash: 预计算的 SHA256 哈希（避免重复计算）
+    """
     path = Path(filepath)
     ext = path.suffix.lower()
 
@@ -258,6 +252,8 @@ def get_file_info(filepath: str) -> dict:
 
     size = path.stat().st_size if path.exists() else 0
     mime = detect_mime_type(filepath)
+    if file_hash is None:
+        file_hash = compute_file_hash(filepath)
 
     return {
         "name": path.name,
@@ -266,5 +262,5 @@ def get_file_info(filepath: str) -> dict:
         "type": EXT_TO_TYPE.get(ext, "Unknown"),
         "extension": ext,
         "mime_type": mime,
-        "sha256": compute_file_hash(filepath),
+        "sha256": file_hash,
     }

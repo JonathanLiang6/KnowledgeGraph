@@ -1,14 +1,16 @@
 """
 RAG 编排服务 - 串联 chunk → embed → hybrid search → rerank → build context
 v2.2: GraphRAG 增强检索 / 查询改写 / LRU 缓存 / 检索指标日志
+v2.3: 图谱索引线程安全 + 缓存 key 包含图谱状态
 """
 import time
+import asyncio
 import logging
 from typing import List, Optional, Dict
 from collections import OrderedDict
 from app.services.chunking_service import SemanticChunker, Chunk
 from app.services.embedding_service import EmbeddingService
-from app.services.hybrid_search import HybridSearchService, SearchResult
+from app.services.hybrid_search import HybridSearchService, SearchResult, hybrid_search_service
 from app.services.reranker_service import RerankerService
 from app.core.config import config
 
@@ -21,15 +23,26 @@ _chunker = SemanticChunker(
     chunk_overlap=config.CHUNK_OVERLAP,
     strategy="parent_child",
 )
-_hybrid_search = HybridSearchService()
+_hybrid_search = hybrid_search_service  # v2.5: 使用模块级单例
 
-# ── 图谱实体索引 (内存) ────────────────────────────────────
+# ── 图谱实体索引 (内存) + 线程安全 ──────────────────────────
 # 结构: {"实体名": {"type": "...", "related": ["关联实体1", ...], "id": "..."}}
 _graph_entity_index: Dict[str, dict] = {}
+_graph_index_lock: Optional[asyncio.Lock] = None  # 延迟创建 (v2.4: 避免绑定错误事件循环)
+_graph_version: int = 0
+
+
+def _get_lock() -> asyncio.Lock:
+    """延迟获取锁 (v2.4: 确保绑定到正确的 event loop)"""
+    global _graph_index_lock
+    if _graph_index_lock is None:
+        _graph_index_lock = asyncio.Lock()
+    return _graph_index_lock
 
 
 def update_graph_index(nodes: List[dict], links: List[dict]):
-    """更新图谱实体索引，供 GraphRAG 检索使用"""
+    """更新图谱实体索引，供 GraphRAG 检索使用（非异步，由调用方保证线程安全）"""
+    global _graph_version
     if not nodes:
         return
     _graph_entity_index.clear()
@@ -42,32 +55,43 @@ def update_graph_index(nodes: List[dict], links: List[dict]):
             "related": [],
         }
 
-    # 填充关联实体
+    # 填充关联实体 (v2.3: 先构建 ID→name 映射, O(n+m) 替代 O(n*m))
+    id_to_name = {nd.get("id", ""): nd.get("name", "") for nd in nodes}
     for link in links:
         src = link.get("source", "")
         tgt = link.get("target", "")
-        src_node = next((n for n in nodes if n.get("id") == src), None)
-        tgt_node = next((n for n in nodes if n.get("id") == tgt), None)
-        if src_node and tgt_node:
-            src_name = src_node.get("name", "")
-            tgt_name = tgt_node.get("name", "")
-            if src_name in name_to_info:
-                name_to_info[src_name]["related"].append(tgt_name)
-            if tgt_name in name_to_info:
-                name_to_info[tgt_name]["related"].append(src_name)
+        src_name = id_to_name.get(src, "")
+        tgt_name = id_to_name.get(tgt, "")
+        if src_name in name_to_info:
+            name_to_info[src_name]["related"].append(tgt_name)
+        if tgt_name in name_to_info:
+            name_to_info[tgt_name]["related"].append(src_name)
 
     for name, info in name_to_info.items():
         _graph_entity_index[name] = info
-    logger.debug(f"[GraphRAG] 图谱索引更新: {len(_graph_entity_index)} 实体")
+    _graph_version += 1
+    logger.debug(f"[GraphRAG] 图谱索引更新: {len(_graph_entity_index)} 实体 (v{_graph_version})")
+
+
+async def _extract_query_entities_async(query: str) -> List[str]:
+    """从查询中快速匹配图谱实体（基于子串匹配, 带锁）"""
+    lock = _get_lock()
+    async with lock:
+        matched = []
+        for name in _graph_entity_index:
+            if len(name) >= 2 and name in query:
+                matched.append(name)
+        # 按权重排序，取 top
+        matched.sort(key=lambda n: _graph_entity_index[n].get("weight", 0), reverse=True)
+        return matched
 
 
 def _extract_query_entities(query: str) -> List[str]:
-    """从查询中快速匹配图谱实体（基于子串匹配）"""
+    """同步版本（内部使用，调用方需确保线程安全）"""
     matched = []
     for name in _graph_entity_index:
         if len(name) >= 2 and name in query:
             matched.append(name)
-    # 按权重排序，取 top
     matched.sort(key=lambda n: _graph_entity_index[n].get("weight", 0), reverse=True)
     return matched
 
@@ -158,8 +182,8 @@ class RAGService:
         use_rerank: bool = True,
     ) -> List[SearchResult]:
         """异步查询检索 + GraphRAG 增强"""
-        # 检查缓存
-        cache_key = f"{query}:{top_k}:{use_rerank}"
+        # 检查缓存 (v2.3: 缓存 key 包含图谱版本)
+        cache_key = f"{query}:{top_k}:{use_rerank}:gv{_graph_version}"
         cached = _search_cache.get(cache_key)
         if cached is not None:
             logger.debug(f"[RAG] 缓存命中: {query[:50]}...")
@@ -170,9 +194,9 @@ class RAGService:
         if top_k is None:
             top_k = config.HYBRID_SEARCH_TOP_K
 
-        # GraphRAG 增强: 用图谱实体扩展查询
+        # GraphRAG 增强: 用图谱实体扩展查询 (v2.3: 带锁保护)
         if config.ENABLE_GRAPH_RAG and _graph_entity_index:
-            results = _graph_enhanced_search(query, top_k, use_rerank)
+            results = await _graph_enhanced_search_async(query, top_k, use_rerank)
         else:
             results = _do_search(query, top_k, use_rerank)
 
@@ -214,6 +238,9 @@ class RAGService:
                 break
 
             text = result.parent_text if result.parent_text else result.text
+            # v2.4: 安全处理 None text
+            if not text:
+                continue
             # 文本去重
             text_key = text[:100]
             if text_key in seen_texts:
@@ -271,13 +298,70 @@ def _do_search(
     return results[:top_k]
 
 
+async def _graph_enhanced_search_async(
+    query: str,
+    top_k: int,
+    use_rerank: bool,
+) -> List[SearchResult]:
+    """
+    GraphRAG 增强检索 (v2.3: 带 asyncio.Lock 保护)：
+    1. 从 query 中匹配图谱实体
+    2. 用关联实体名扩展 query
+    3. 原始 query + 扩展 query 各检索一轮
+    4. RRF 融合两轮结果
+    """
+    t0 = time.monotonic()
+
+    # 1. 匹配图谱实体（带锁）
+    matched = await _extract_query_entities_async(query)
+
+    if not matched:
+        logger.debug("[GraphRAG] 未匹配到图谱实体，使用原始检索")
+        return _do_search(query, top_k, use_rerank)
+
+    # 2. 收集关联实体（带锁读取）
+    lock = _get_lock()
+    async with lock:
+        expand_terms = []
+        seen_expand = set(matched)
+        for name in matched[:config.GRAPH_RAG_EXPAND_ENTITIES]:
+            info = _graph_entity_index.get(name, {})
+            for rel in info.get("related", [])[:5]:
+                if rel not in seen_expand:
+                    expand_terms.append(rel)
+                    seen_expand.add(rel)
+
+    if not expand_terms:
+        return _do_search(query, top_k, use_rerank)
+
+    # 3. 扩展查询
+    expanded_query = query + " " + " ".join(expand_terms[:5])
+    logger.debug(f"[GraphRAG] 匹配实体: {matched[:3]}, 扩展词: {expand_terms[:5]}")
+
+    # 4. 两轮检索
+    raw_results = _do_search(query, top_k, use_rerank)
+    exp_results = _do_search(expanded_query, top_k, use_rerank)
+
+    # 5. RRF 融合
+    merged = _rrf_fusion([raw_results, exp_results], k=60)
+    merged.sort(key=lambda r: r.score, reverse=True)
+
+    elapsed = (time.monotonic() - t0) * 1000
+    logger.debug(
+        f"[GraphRAG] 增强检索: raw={len(raw_results)} exp={len(exp_results)} "
+        f"merged={len(merged)} | {elapsed:.0f}ms"
+    )
+
+    return merged[:top_k]
+
+
 def _graph_enhanced_search(
     query: str,
     top_k: int,
     use_rerank: bool,
 ) -> List[SearchResult]:
     """
-    GraphRAG 增强检索：
+    GraphRAG 增强检索（同步版, 仅供内部非并发场景使用）：
     1. 从 query 中匹配图谱实体
     2. 用关联实体名扩展 query
     3. 原始 query + 扩展 query 各检索一轮

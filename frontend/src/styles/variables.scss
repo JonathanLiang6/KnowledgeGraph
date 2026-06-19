@@ -1,58 +1,61 @@
 // ============================================================
-// KnowledgeGraph v2.0 - 明亮轻快 SaaS 风格 CSS 变量
+// KnowledgeGraph v2.5 - 森林绿主题 CSS 变量
+// 参考 Material Design 3 Forest Green + Linear/Vercel 设计语言
 // ============================================================
 
 :root {
-  // 主色调 - 清新蓝紫渐变
-  --color-primary: #4F8CF7;
-  --color-primary-light: #7CABFF;
-  --color-primary-dark: #3A6FDB;
-  --color-primary-gradient: linear-gradient(135deg, #4F8CF7 0%, #7C5CFC 100%);
+  // 主色调 - 森林绿系
+  --color-primary: #2D8C4E;
+  --color-primary-light: #4CAF6D;
+  --color-primary-dark: #1A6B35;
+  --color-primary-gradient: linear-gradient(135deg, #2D8C4E 0%, #0D9488 100%);
+  --color-primary-gradient-soft: linear-gradient(135deg, #3CA060 0%, #1A9E8A 100%);
 
   // 辅助色
-  --color-success: #52C41A;
-  --color-success-bg: #F0FFF4;
-  --color-warning: #FAAD14;
-  --color-warning-bg: #FFFBE6;
-  --color-danger: #FF4D4F;
-  --color-danger-bg: #FFF2F0;
-  --color-info: #4F8CF7;
-  --color-info-bg: #F0F5FF;
+  --color-success: #2D8C4E;
+  --color-success-bg: #EDF7F0;
+  --color-warning: #E6A817;
+  --color-warning-bg: #FFFDF0;
+  --color-danger: #E04B4B;
+  --color-danger-bg: #FFF0F0;
+  --color-info: #0D9488;
+  --color-info-bg: #EDF7F5;
 
   // 背景色
-  --bg-page: #F0F4FF;
+  --bg-page: #F2F7F2;
   --bg-card: #FFFFFF;
   --bg-sidebar: #FFFFFF;
-  --bg-glass: rgba(255, 255, 255, 0.85);
-  --bg-hover: #F8FAFF;
+  --bg-glass: rgba(255, 255, 255, 0.82);
+  --bg-hover: #F5FAF5;
+  --bg-active: #E8F5E9;
 
   // 文字色
-  --text-primary: #1A1A2E;
-  --text-secondary: #6B7280;
-  --text-tertiary: #9CA3AF;
+  --text-primary: #1A231E;
+  --text-secondary: #5A6B5E;
+  --text-tertiary: #8A9A8D;
   --text-inverse: #FFFFFF;
 
   // 边框
-  --border-color: #E8ECF4;
-  --border-light: #F0F2F8;
+  --border-color: #DDE8DF;
+  --border-light: #EDF4EE;
 
-  // 阴影
-  --shadow-xs: 0 1px 2px rgba(79, 140, 247, 0.04);
-  --shadow-sm: 0 1px 3px rgba(79, 140, 247, 0.06);
-  --shadow-md: 0 2px 12px rgba(79, 140, 247, 0.10);
-  --shadow-lg: 0 8px 24px rgba(79, 140, 247, 0.14);
-  --shadow-xl: 0 12px 36px rgba(79, 140, 247, 0.18);
-  --shadow-glow: 0 0 20px rgba(79, 140, 247, 0.20);
+  // 阴影 - 森林绿调
+  --shadow-xs: 0 1px 2px rgba(45, 140, 78, 0.04);
+  --shadow-sm: 0 1px 3px rgba(45, 140, 78, 0.07);
+  --shadow-md: 0 4px 14px rgba(45, 140, 78, 0.10);
+  --shadow-lg: 0 8px 28px rgba(45, 140, 78, 0.13);
+  --shadow-xl: 0 14px 40px rgba(45, 140, 78, 0.16);
+  --shadow-glow: 0 0 24px rgba(45, 140, 78, 0.22);
 
   // 毛玻璃
-  --glass-blur: 16px;
+  --glass-blur: 18px;
 
   // 圆角
   --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 10px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
   --radius-lg: 16px;
-  --radius-xl: 20px;
+  --radius-xl: 24px;
   --radius-full: 9999px;
 
   // 间距
@@ -63,10 +66,18 @@
   --spacing-xl: 32px;
   --spacing-2xl: 48px;
 
-  // 过渡
-  --transition-fast: 0.15s ease;
-  --transition-normal: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-slow: 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  // 过渡 - 弹性曲线
+  --transition-fast: 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+  --transition-normal: 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  --transition-slow: 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  --transition-spring: 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  // 动画时长
+  --duration-instant: 80ms;
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+  --duration-slow: 500ms;
+  --duration-glacial: 800ms;
 
   // 侧边栏
   --sidebar-width: 240px;

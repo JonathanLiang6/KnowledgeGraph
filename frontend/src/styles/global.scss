@@ -1,8 +1,12 @@
 // ============================================================
-// KnowledgeGraph v2.0 - 全局样式
+// KnowledgeGraph v2.5 - 全局样式 & 动画系统
+// 森林绿主题 · 弹性动画 · Element Plus 全覆盖
 // ============================================================
 @use './variables.scss';
 
+// ==========================================
+// Reset
+// ==========================================
 * {
   margin: 0;
   padding: 0;
@@ -20,8 +24,21 @@ html, body, #app {
   -moz-osx-font-smoothing: grayscale;
 }
 
+// 背景纹理 - 极淡网格
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(45, 140, 78, 0.03) 0%, transparent 50%),
+    radial-gradient(circle at 80% 60%, rgba(13, 148, 136, 0.03) 0%, transparent 50%),
+    radial-gradient(circle at 50% 100%, rgba(45, 140, 78, 0.02) 0%, transparent 50%);
+}
+
 // ==========================================
-// 滚动条
+// 滚动条 - 森林绿
 // ==========================================
 ::-webkit-scrollbar {
   width: 6px;
@@ -34,7 +51,7 @@ html, body, #app {
   background: var(--border-color);
   border-radius: 3px;
   &:hover {
-    background: var(--text-tertiary);
+    background: var(--color-primary-light);
   }
 }
 
@@ -47,14 +64,16 @@ html, body, #app {
 }
 
 // ==========================================
-// 链接
+// 链接 - 下滑线动画
 // ==========================================
 a {
   color: var(--color-primary);
   text-decoration: none;
+  position: relative;
   transition: color var(--transition-fast);
+
   &:hover {
-    color: var(--color-primary-light);
+    color: var(--color-primary-dark);
   }
 }
 
@@ -65,13 +84,17 @@ a {
   background: var(--bg-glass);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.35);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
-  transition: box-shadow var(--transition-normal), transform var(--transition-normal);
+  transition:
+    box-shadow var(--transition-normal),
+    transform var(--transition-normal),
+    border-color var(--transition-normal);
 
   &:hover {
     box-shadow: var(--shadow-lg);
+    border-color: rgba(45, 140, 78, 0.15);
   }
 }
 
@@ -87,6 +110,7 @@ a {
 
   &:hover {
     box-shadow: var(--shadow-md);
+    border-color: rgba(45, 140, 78, 0.12);
   }
 }
 
@@ -108,6 +132,8 @@ a {
   transition: all var(--transition-fast);
   outline: none;
   line-height: 1.5;
+  position: relative;
+  overflow: hidden;
 
   &:disabled {
     opacity: 0.5;
@@ -116,7 +142,8 @@ a {
   }
 
   &:active:not(:disabled) {
-    transform: scale(0.97) !important;
+    transform: scale(0.96) !important;
+    transition: transform 0.1s ease !important;
   }
 }
 
@@ -124,11 +151,17 @@ a {
   @extend .btn;
   background: var(--color-primary-gradient);
   color: var(--text-inverse);
-  box-shadow: 0 2px 8px rgba(79, 140, 247, 0.3);
+  box-shadow: 0 2px 10px rgba(45, 140, 78, 0.28);
+  animation: glow-pulse 3s ease-in-out infinite;
 
   &:hover:not(:disabled) {
-    box-shadow: 0 4px 16px rgba(79, 140, 247, 0.45);
+    box-shadow: 0 6px 20px rgba(45, 140, 78, 0.42);
     transform: translateY(-1px);
+  }
+
+  &:active:not(:disabled) {
+    box-shadow: 0 1px 4px rgba(45, 140, 78, 0.3);
+    transform: scale(0.96) !important;
   }
 }
 
@@ -142,6 +175,7 @@ a {
     background: var(--bg-hover);
     border-color: var(--color-primary-light);
     color: var(--color-primary);
+    transform: translateY(-1px);
   }
 }
 
@@ -149,11 +183,13 @@ a {
   @extend .btn;
   background: var(--color-danger-bg);
   color: var(--color-danger);
-  border: 1px solid #FBC4C4;
+  border: 1px solid #F5C4C4;
 
   &:hover:not(:disabled) {
     background: #FDE2E2;
     border-color: var(--color-danger);
+    box-shadow: 0 4px 12px rgba(224, 75, 75, 0.2);
+    transform: translateY(-1px);
   }
 }
 
@@ -193,7 +229,12 @@ input, textarea, select {
 // 加载占位
 // ==========================================
 .skeleton {
-  background: linear-gradient(90deg, var(--border-light) 25%, var(--bg-page) 50%, var(--border-light) 75%);
+  background: linear-gradient(
+    90deg,
+    var(--border-light) 25%,
+    var(--bg-page) 50%,
+    var(--border-light) 75%
+  );
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   border-radius: var(--radius-sm);
@@ -202,10 +243,12 @@ input, textarea, select {
 // ==========================================
 // 动画关键帧
 // ==========================================
+
+// 淡入上滑
 @keyframes fadeInUp {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(16px);
   }
   to {
     opacity: 1;
@@ -213,15 +256,17 @@ input, textarea, select {
   }
 }
 
+// 淡入
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
+// 右滑入
 @keyframes slideInRight {
   from {
     opacity: 0;
-    transform: translateX(20px);
+    transform: translateX(24px);
   }
   to {
     opacity: 1;
@@ -229,33 +274,124 @@ input, textarea, select {
   }
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+// 弹性缩放
+@keyframes scaleIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  60% {
+    transform: scale(1.03);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
+// 弹性上滑
+@keyframes slideUp {
+  0% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  70% {
+    transform: translateY(-3px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// 发光脉动 - 主按钮
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 2px 10px rgba(45, 140, 78, 0.28);
+  }
+  50% {
+    box-shadow: 0 2px 18px rgba(45, 140, 78, 0.42);
+  }
+}
+
+// 浮动 - 3D 微浮动
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+// 背景渐变流动
+@keyframes bg-shift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+// 渐变边框流动
+@keyframes gradient-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+// 圆点脉动
+@keyframes dot-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.3);
+  }
+}
+
+// 旋转
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
 
+// 闪烁骨架
 @keyframes shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+// 光标闪烁
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 // ==========================================
 // 页面过渡
 // ==========================================
 .page-enter-active {
-  animation: fadeInUp 0.3s ease;
+  animation: fadeInUp 0.35s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .page-leave-active {
   animation: fadeIn 0.2s ease reverse;
 }
 
 // ==========================================
-// 流式光标（聊天）
+// 流式光标（聊天）- 森林绿
 // ==========================================
 .cursor-blink {
   display: inline-block;
@@ -264,12 +400,24 @@ input, textarea, select {
   background: var(--color-primary);
   margin-left: 2px;
   vertical-align: text-bottom;
-  animation: cursorBlink 1s step-end infinite;
+  border-radius: 1px;
+  animation: cursorBlink 0.8s step-end infinite;
 }
 
-@keyframes cursorBlink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+// ==========================================
+// Hero 动态背景
+// ==========================================
+.hero-bg-animated {
+  background: linear-gradient(
+    135deg,
+    #1A6B35 0%,
+    #2D8C4E 25%,
+    #0D9488 50%,
+    #2D8C4E 75%,
+    #1A6B35 100%
+  );
+  background-size: 400% 400%;
+  animation: bg-shift 8s ease infinite;
 }
 
 // ==========================================
@@ -295,12 +443,10 @@ input, textarea, select {
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 // ==========================================
-// Element Plus 主题覆盖
+// Element Plus 全局森林绿主题覆盖
 // ==========================================
-.el-menu {
-  border-right: none !important;
-}
 
+// -- 按钮
 .el-button--primary {
   --el-button-bg-color: var(--color-primary);
   --el-button-border-color: var(--color-primary);
@@ -310,23 +456,38 @@ input, textarea, select {
   --el-button-active-border-color: var(--color-primary-dark);
 }
 
+// -- 菜单
+.el-menu {
+  border-right: none !important;
+  --el-menu-hover-bg-color: var(--bg-hover);
+  --el-menu-active-color: var(--color-primary);
+}
+
+// -- 标签
 .el-tag {
   font-weight: 500;
   border-radius: var(--radius-xs);
+  --el-tag-primary-bg-color: var(--color-success-bg);
+  --el-tag-primary-border-color: rgba(45, 140, 78, 0.25);
+  --el-tag-primary-text-color: var(--color-primary);
 }
 
+// -- 对话框
 .el-dialog {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xl);
 }
 
+// -- 抽屉
 .el-drawer {
   border-radius: var(--radius-lg) 0 0 var(--radius-lg);
 }
 
+// -- 表格
 .el-table {
   --el-table-border-color: var(--border-light);
   --el-table-header-bg-color: var(--bg-page);
+  --el-table-row-hover-bg-color: var(--bg-hover);
   border-radius: var(--radius-md);
   overflow: hidden;
 
@@ -334,19 +495,115 @@ input, textarea, select {
     font-weight: 600;
     color: var(--text-primary);
     font-size: 13px;
+    background: var(--bg-page);
+  }
+
+  // 表格行 hover 左移
+  .el-table__body tr {
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+    &:hover {
+      transform: translateX(2px);
+      box-shadow: inset 3px 0 0 var(--color-primary);
+    }
   }
 }
 
+// -- 分页
 .el-pagination {
   --el-pagination-button-bg-color: var(--bg-card);
+  --el-pagination-hover-color: var(--color-primary);
+  --el-pagination-active-bg-color: var(--color-primary);
 }
 
+// -- 空状态
 .el-empty {
   padding: var(--spacing-2xl) 0;
 }
 
+// -- 单选按钮组
+.el-radio-button {
+  --el-radio-button-checked-bg-color: var(--color-primary);
+  --el-radio-button-checked-border-color: var(--color-primary);
+  --el-radio-button-hover-color: var(--color-primary);
+}
+
 .el-radio-button__inner {
   border-radius: var(--radius-sm);
+}
+
+// -- 滑块
+.el-slider {
+  --el-slider-main-bg-color: var(--color-primary);
+  --el-slider-runway-bg-color: var(--border-color);
+  --el-slider-stop-bg-color: var(--color-primary-light);
+
+  .el-slider__bar {
+    background: var(--color-primary-gradient);
+  }
+}
+
+// -- 输入框
+.el-input {
+  --el-input-focus-border-color: var(--color-primary);
+  --el-input-hover-border-color: var(--color-primary-light);
+}
+
+.el-textarea {
+  --el-input-focus-border-color: var(--color-primary);
+  --el-input-hover-border-color: var(--color-primary-light);
+}
+
+// -- 下拉选择
+.el-select {
+  --el-select-input-focus-border-color: var(--color-primary);
+}
+
+// -- 复选框
+.el-checkbox {
+  --el-checkbox-checked-bg-color: var(--color-primary);
+  --el-checkbox-checked-border-color: var(--color-primary);
+  --el-checkbox-checked-input-border-color: var(--color-primary);
+}
+
+// -- 进度条
+.el-progress {
+  --el-progress-text-color: var(--text-primary);
+}
+
+.el-progress-bar__inner {
+  background: var(--color-primary-gradient) !important;
+  background-size: 200% 100% !important;
+  animation: gradient-flow 2s linear infinite;
+}
+
+// -- 开关
+.el-switch {
+  --el-switch-on-color: var(--color-primary);
+}
+
+// -- 消息提示
+.el-message {
+  --el-message-bg-color: var(--bg-card);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+// -- 确认框
+.el-message-box {
+  border-radius: var(--radius-lg);
+}
+
+// ==========================================
+// 可访问性 - 减弱动画偏好
+// ==========================================
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 // ==========================================

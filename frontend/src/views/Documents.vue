@@ -146,7 +146,7 @@ function formatSize(b) {
 }
 
 function formatDate(d) {
-  return d ? new Date(d).toLocaleString('zh-CN') : ''
+  return d ? new Date(d).toLocaleDateString('zh-CN') : ''
 }
 
 function statusType(s) {
@@ -339,10 +339,22 @@ onBeforeUnmount(() => {
   .upload-progress {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
+    padding: 6px 14px;
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-light);
+    animation: fadeInUp 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+
+    :deep(.el-progress-bar__inner) {
+      background: var(--color-primary-gradient) !important;
+      background-size: 200% 100% !important;
+      animation: gradient-flow 2s linear infinite !important;
+    }
+
     .progress-text {
       font-size: 12px;
-      color: var(--color-text-secondary);
+      color: var(--text-secondary);
       white-space: nowrap;
     }
   }
@@ -353,10 +365,17 @@ onBeforeUnmount(() => {
   }
   .file-name {
     font-weight: 500;
+    transition: color var(--transition-fast);
+
+    // 行 hover 时文件名变绿
+    :deep(.el-table__row:hover) & {
+      color: var(--color-primary);
+    }
   }
   .error-icon {
     margin-left: 6px;
     cursor: help;
+    animation: dot-pulse 2s ease-in-out infinite;
   }
   .pagination-bar {
     display: flex;

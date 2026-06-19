@@ -285,11 +285,14 @@ onUnmounted(() => {
   align-items: center;
   margin-bottom: var(--spacing-md);
   flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
 
   .toolbar-actions {
     display: flex;
     align-items: center;
     gap: var(--spacing-md);
+    flex-wrap: wrap;
   }
 }
 
@@ -300,6 +303,10 @@ onUnmounted(() => {
   gap: var(--spacing-sm);
   color: var(--text-secondary);
   font-size: 13px;
+
+  :deep(.el-slider__bar) {
+    background: var(--color-primary-gradient);
+  }
 
   .size-label {
     font-size: 12px;
@@ -327,6 +334,9 @@ onUnmounted(() => {
   border-radius: var(--radius-md);
   overflow: hidden;
   border: 1px solid var(--border-light);
+  box-shadow:
+    inset 0 2px 8px rgba(0, 0, 0, 0.03),
+    var(--shadow-sm);
   min-height: 0;
 }
 
@@ -336,6 +346,7 @@ onUnmounted(() => {
   display: block;
 }
 
+// ── 图例面板 ──────────────────────────────────────────
 .legend-panel {
   position: absolute;
   top: var(--spacing-md);
@@ -345,6 +356,7 @@ onUnmounted(() => {
   max-height: 55%;
   overflow-y: auto;
   z-index: 10;
+  animation: fadeInUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
 
   h4 { font-size: 13px; margin: 0; color: var(--text-secondary); }
 
@@ -358,18 +370,23 @@ onUnmounted(() => {
 
   .legend-toggle {
     display: flex;
-    gap: 2px;
+    gap: 3px;
   }
 
   .legend-btn {
     font-size: 10px;
-    padding: 1px 6px;
+    padding: 2px 8px;
     border: 1px solid var(--border-light);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     background: var(--bg-page);
     color: var(--text-tertiary);
     cursor: pointer;
-    &:hover { color: var(--color-primary); border-color: var(--color-primary); }
+    transition: all var(--transition-fast);
+    &:hover {
+      color: var(--color-primary);
+      border-color: var(--color-primary);
+      background: var(--bg-hover);
+    }
   }
 }
 
@@ -378,13 +395,14 @@ onUnmounted(() => {
   top: var(--spacing-md);
   left: var(--spacing-md);
   padding: var(--spacing-md);
-  min-width: 110px;
+  min-width: 120px;
+  animation: fadeInUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
 
   h4 { font-size: 13px; margin-bottom: var(--spacing-sm); color: var(--text-secondary); }
 }
 
 .legend-item {
-  margin-bottom: 2px;
+  margin-bottom: 3px;
 
   .legend-label {
     display: flex;
@@ -394,6 +412,13 @@ onUnmounted(() => {
     color: var(--text-secondary);
     cursor: pointer;
     user-select: none;
+    padding: 3px 4px;
+    border-radius: var(--radius-xs);
+    transition: background var(--transition-fast);
+
+    &:hover {
+      background: var(--bg-hover);
+    }
 
     input[type="checkbox"] {
       width: 13px;
@@ -408,7 +433,12 @@ onUnmounted(() => {
     height: 10px;
     border-radius: 50%;
     flex-shrink: 0;
-    box-shadow: 0 0 4px currentColor;
+    box-shadow: 0 0 6px currentColor;
+    transition: box-shadow var(--transition-fast);
+
+    .legend-label:hover & {
+      box-shadow: 0 0 10px currentColor;
+    }
   }
 }
 
@@ -416,24 +446,35 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   font-size: 13px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   gap: var(--spacing-md);
 
-  strong { color: var(--color-primary); }
+  strong {
+    color: var(--color-primary);
+    font-size: 15px;
+    transition: transform var(--transition-fast);
+  }
+
+  &:hover strong {
+    transform: scale(1.1);
+  }
 }
 
 .hint-bar {
   position: absolute;
-  bottom: var(--spacing-sm);
+  bottom: var(--spacing-md);
   left: 50%;
   transform: translateX(-50%);
   font-size: 11px;
   color: var(--text-tertiary);
   background: var(--bg-glass);
-  backdrop-filter: blur(8px);
-  padding: 4px 12px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 6px 16px;
   border-radius: var(--radius-full);
   pointer-events: none;
+  box-shadow: var(--shadow-sm);
+  transition: opacity 0.5s ease;
 }
 
 .entity-detail {
@@ -444,10 +485,11 @@ onUnmounted(() => {
     margin-bottom: var(--spacing-md);
 
     .entity-dot {
-      width: 14px;
-      height: 14px;
+      width: 16px;
+      height: 16px;
       border-radius: 50%;
       flex-shrink: 0;
+      box-shadow: 0 0 8px currentColor;
     }
 
     h3 { font-size: 18px; font-weight: 600; }
@@ -456,18 +498,23 @@ onUnmounted(() => {
   .entity-meta {
     margin-top: var(--spacing-lg);
     display: flex;
-    gap: var(--spacing-lg);
+    gap: var(--spacing-xl);
 
     .meta-item {
       display: flex;
       flex-direction: column;
-      .meta-label { font-size: 12px; color: var(--text-tertiary); }
-      .meta-value { font-size: 20px; font-weight: 600; color: var(--text-primary); }
+      .meta-label { font-size: 12px; color: var(--text-tertiary); margin-bottom: 2px; }
+      .meta-value {
+        font-size: 22px;
+        font-weight: 600;
+        color: var(--color-primary);
+        transition: transform var(--transition-fast);
+      }
     }
   }
 
   .entity-related {
-    margin-top: var(--spacing-lg);
+    margin-top: var(--spacing-xl);
     h4 {
       font-size: 14px;
       margin-bottom: var(--spacing-md);
@@ -479,32 +526,38 @@ onUnmounted(() => {
       display: flex;
       align-items: center;
       gap: var(--spacing-sm);
-      padding: var(--spacing-sm);
+      padding: var(--spacing-sm) var(--spacing-md);
       border-bottom: 1px solid var(--border-light);
       border-radius: var(--radius-sm);
-      transition: background 0.15s;
+      transition: all var(--transition-fast);
 
       &.clickable {
         cursor: pointer;
         &:hover {
-          background: var(--bg-page);
+          background: var(--bg-hover);
+          transform: translateX(4px);
+
           .related-name { color: var(--color-primary); }
+          .related-arrow { opacity: 1; transform: translateX(0); }
         }
       }
 
       .related-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-      .related-name { font-weight: 500; flex: 1; transition: color 0.15s; }
+      .related-name { font-weight: 500; flex: 1; transition: color var(--transition-fast); }
       .related-type { font-size: 11px; color: var(--text-tertiary); }
       .related-rel {
         font-size: 11px;
         color: var(--color-primary);
-        background: var(--bg-page);
-        padding: 1px 8px;
+        background: var(--bg-active);
+        padding: 1px 10px;
         border-radius: var(--radius-full);
       }
       .related-arrow {
         color: var(--text-tertiary);
         flex-shrink: 0;
+        opacity: 0.4;
+        transform: translateX(-4px);
+        transition: all var(--transition-fast);
       }
     }
   }

@@ -1,7 +1,7 @@
 [project]
 name = "knowledge-graph"
-version = "2.4.0"
-description = "企业级知识图谱 + RAG 问答系统"
+version = "3.0.0"
+description = "知识图谱智能问答系统 — 森林绿主题 · D3.js 图谱可视化 · SSE 流式问答"
 requires-python = ">=3.11"
 readme = "README.md"
 

@@ -4,16 +4,13 @@
     <header class="kb-header">
       <div class="kb-header-left">
         <button class="back-btn btn-ghost" @click="$router.push('/')">
-          <el-icon :size="16" class="back-arrow"><ArrowLeft /></el-icon>
+          <el-icon :size="16"><ArrowLeft /></el-icon>
           <span>返回</span>
         </button>
         <div class="kb-title" v-if="kb">
           <el-icon :size="20" color="var(--color-primary)"><Collection /></el-icon>
           <h1>{{ kb.name }}</h1>
-          <span class="kb-doc-count" v-if="kb.document_count > 0">
-            <span class="count-dot" />
-            {{ kb.document_count }} 篇文档
-          </span>
+          <span class="kb-doc-count" v-if="kb.document_count > 0">{{ kb.document_count }} 篇文档</span>
         </div>
         <div class="kb-title skeleton-title" v-else-if="loading">
           <span class="skeleton" style="width:200px;height:28px" />
@@ -30,22 +27,18 @@
 
     <!-- 子导航标签 -->
     <nav class="kb-nav" v-if="kb">
-      <div class="nav-inner">
-        <router-link :to="`/kb/${kbId}/graph`" class="nav-tab" active-class="active">
-          <el-icon :size="16"><Share /></el-icon>
-          <span>知识图谱</span>
-        </router-link>
-        <router-link :to="`/kb/${kbId}/chat`" class="nav-tab" active-class="active">
-          <el-icon :size="16"><ChatDotRound /></el-icon>
-          <span>智能问答</span>
-        </router-link>
-        <router-link :to="`/kb/${kbId}/documents`" class="nav-tab" active-class="active">
-          <el-icon :size="16"><Document /></el-icon>
-          <span>文档管理</span>
-        </router-link>
-        <!-- 滑动指示器 -->
-        <div class="nav-indicator" ref="navIndicator" />
-      </div>
+      <router-link :to="`/kb/${kbId}/graph`" class="nav-tab" active-class="active">
+        <el-icon :size="16"><Share /></el-icon>
+        <span>知识图谱</span>
+      </router-link>
+      <router-link :to="`/kb/${kbId}/chat`" class="nav-tab" active-class="active">
+        <el-icon :size="16"><ChatDotRound /></el-icon>
+        <span>智能问答</span>
+      </router-link>
+      <router-link :to="`/kb/${kbId}/documents`" class="nav-tab" active-class="active">
+        <el-icon :size="16"><Document /></el-icon>
+        <span>文档管理</span>
+      </router-link>
     </nav>
 
     <!-- 子页面内容 -->
@@ -62,7 +55,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { getKnowledgeBase } from '../api/knowledgeBase'
 import { ArrowLeft, Collection, Document, Share, ChatDotRound } from '@element-plus/icons-vue'
@@ -72,7 +65,6 @@ const kbId = computed(() => route.params.id)
 const kb = ref(null)
 const loading = ref(true)
 const error = ref(false)
-const navIndicator = ref(null)
 
 async function fetchKB() {
   loading.value = true
@@ -88,33 +80,11 @@ async function fetchKB() {
   }
 }
 
-// 滑动指示器位置更新
-function updateNavIndicator() {
-  nextTick(() => {
-    if (!navIndicator.value) return
-    const active = document.querySelector('.nav-tab.active')
-    if (active) {
-      navIndicator.value.style.width = `${active.offsetWidth}px`
-      navIndicator.value.style.transform = `translateX(${active.offsetLeft}px)`
-    }
-  })
-}
-
-onMounted(() => {
-  fetchKB()
-  // 初始和窗口变化时更新指示器
-  updateNavIndicator()
-  window.addEventListener('resize', updateNavIndicator)
-})
+onMounted(fetchKB)
 
 // 路由参数变化时重新加载（切换知识库）
 watch(() => route.params.id, (newId) => {
   if (newId) fetchKB()
-})
-
-// 路由路径变化时更新导航指示器
-watch(() => route.path, () => {
-  updateNavIndicator()
 })
 </script>
 
@@ -133,31 +103,11 @@ watch(() => route.path, () => {
   padding: 12px 24px;
   background: var(--bg-glass);
   backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
   border-bottom: 1px solid var(--border-light);
   position: sticky;
   top: 0;
   z-index: 50;
   min-height: 56px;
-
-  // 渐变底边
-  &::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      var(--color-primary-light) 30%,
-      var(--color-primary) 50%,
-      var(--color-primary-light) 70%,
-      transparent 100%
-    );
-    opacity: 0.5;
-  }
 }
 
 .kb-header-left {
@@ -170,14 +120,6 @@ watch(() => route.path, () => {
   padding: 6px 12px;
   font-size: 13px;
   flex-shrink: 0;
-
-  .back-arrow {
-    transition: transform var(--transition-fast);
-  }
-
-  &:hover .back-arrow {
-    transform: translateX(-3px);
-  }
 }
 
 .kb-title {
@@ -194,20 +136,9 @@ watch(() => route.path, () => {
   .kb-doc-count {
     font-size: 12px;
     color: var(--text-tertiary);
-    padding: 2px 10px;
+    padding: 2px 8px;
     background: var(--bg-page);
     border-radius: var(--radius-full);
-    display: flex;
-    align-items: center;
-    gap: 5px;
-
-    .count-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--color-primary);
-      animation: dot-pulse 2s ease-in-out infinite;
-    }
   }
 }
 
@@ -215,8 +146,10 @@ watch(() => route.path, () => {
   flex: 1;
 }
 
-// ── 导航标签 ──────────────────────────────────────────
 .kb-nav {
+  display: flex;
+  gap: 0;
+  padding: 0 24px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-light);
   position: sticky;
@@ -224,46 +157,28 @@ watch(() => route.path, () => {
   z-index: 40;
 }
 
-.nav-inner {
-  display: flex;
-  position: relative;
-  padding: 0 24px;
-}
-
 .nav-tab {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 13px 22px;
+  padding: 12px 20px;
   font-size: 14px;
   font-weight: 500;
   color: var(--text-secondary);
   text-decoration: none;
-  transition: color var(--transition-fast);
-  position: relative;
-  z-index: 1;
+  border-bottom: 2px solid transparent;
+  transition: all var(--transition-fast);
+  margin-bottom: -1px;
 
   &:hover {
     color: var(--color-primary);
+    background: var(--bg-hover);
   }
 
   &.active {
     color: var(--color-primary);
-    font-weight: 600;
+    border-bottom-color: var(--color-primary);
   }
-}
-
-// 滑动指示器
-.nav-indicator {
-  position: absolute;
-  bottom: 0;
-  left: 24px;
-  height: 2.5px;
-  border-radius: 2px;
-  background: var(--color-primary-gradient);
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
-              width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-  z-index: 0;
 }
 
 .kb-main {

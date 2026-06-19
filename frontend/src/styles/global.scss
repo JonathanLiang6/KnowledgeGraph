@@ -1,0 +1,363 @@
+// ============================================================
+// KnowledgeGraph v2.0 - 全局样式
+// ============================================================
+@use './variables.scss';
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+// ==========================================
+// 滚动条
+// ==========================================
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+  &:hover {
+    background: var(--text-tertiary);
+  }
+}
+
+// ==========================================
+// 选中
+// ==========================================
+::selection {
+  background: var(--color-primary);
+  color: var(--text-inverse);
+}
+
+// ==========================================
+// 链接
+// ==========================================
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+  &:hover {
+    color: var(--color-primary-light);
+  }
+}
+
+// ==========================================
+// 毛玻璃卡片
+// ==========================================
+.glass-card {
+  background: var(--bg-glass);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  transition: box-shadow var(--transition-normal), transform var(--transition-normal);
+
+  &:hover {
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+// ==========================================
+// 普通卡片
+// ==========================================
+.card {
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  border: 1px solid var(--border-light);
+  transition: all var(--transition-normal);
+
+  &:hover {
+    box-shadow: var(--shadow-md);
+  }
+}
+
+// ==========================================
+// 按钮基础
+// ==========================================
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  outline: none;
+  line-height: 1.5;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+  }
+
+  &:active:not(:disabled) {
+    transform: scale(0.97) !important;
+  }
+}
+
+.btn-primary {
+  @extend .btn;
+  background: var(--color-primary-gradient);
+  color: var(--text-inverse);
+  box-shadow: 0 2px 8px rgba(79, 140, 247, 0.3);
+
+  &:hover:not(:disabled) {
+    box-shadow: 0 4px 16px rgba(79, 140, 247, 0.45);
+    transform: translateY(-1px);
+  }
+}
+
+.btn-secondary {
+  @extend .btn;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+
+  &:hover:not(:disabled) {
+    background: var(--bg-hover);
+    border-color: var(--color-primary-light);
+    color: var(--color-primary);
+  }
+}
+
+.btn-danger {
+  @extend .btn;
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border: 1px solid #FBC4C4;
+
+  &:hover:not(:disabled) {
+    background: #FDE2E2;
+    border-color: var(--color-danger);
+  }
+}
+
+.btn-ghost {
+  @extend .btn;
+  background: transparent;
+  color: var(--text-secondary);
+
+  &:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--color-primary);
+  }
+}
+
+// ==========================================
+// 页面标题
+// ==========================================
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  letter-spacing: -0.02em;
+}
+
+// ==========================================
+// 输入框基础样式
+// ==========================================
+input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+// ==========================================
+// 加载占位
+// ==========================================
+.skeleton {
+  background: linear-gradient(90deg, var(--border-light) 25%, var(--bg-page) 50%, var(--border-light) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+
+// ==========================================
+// 动画关键帧
+// ==========================================
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+// ==========================================
+// 页面过渡
+// ==========================================
+.page-enter-active {
+  animation: fadeInUp 0.3s ease;
+}
+.page-leave-active {
+  animation: fadeIn 0.2s ease reverse;
+}
+
+// ==========================================
+// 流式光标（聊天）
+// ==========================================
+.cursor-blink {
+  display: inline-block;
+  width: 2px;
+  height: 16px;
+  background: var(--color-primary);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: cursorBlink 1s step-end infinite;
+}
+
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+// ==========================================
+// 通用工具类
+// ==========================================
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+.text-muted { color: var(--text-secondary); }
+.text-xs { font-size: 12px; }
+.text-sm { font-size: 13px; }
+.font-medium { font-weight: 500; }
+.font-semibold { font-weight: 600; }
+.mt-sm { margin-top: var(--spacing-sm); }
+.mt-md { margin-top: var(--spacing-md); }
+.mt-lg { margin-top: var(--spacing-lg); }
+.mb-sm { margin-bottom: var(--spacing-sm); }
+.mb-md { margin-bottom: var(--spacing-md); }
+.mb-lg { margin-bottom: var(--spacing-lg); }
+.flex-center { display: flex; align-items: center; justify-content: center; }
+.flex-between { display: flex; align-items: center; justify-content: space-between; }
+.gap-sm { gap: var(--spacing-sm); }
+.gap-md { gap: var(--spacing-md); }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+// ==========================================
+// Element Plus 主题覆盖
+// ==========================================
+.el-menu {
+  border-right: none !important;
+}
+
+.el-button--primary {
+  --el-button-bg-color: var(--color-primary);
+  --el-button-border-color: var(--color-primary);
+  --el-button-hover-bg-color: var(--color-primary-light);
+  --el-button-hover-border-color: var(--color-primary-light);
+  --el-button-active-bg-color: var(--color-primary-dark);
+  --el-button-active-border-color: var(--color-primary-dark);
+}
+
+.el-tag {
+  font-weight: 500;
+  border-radius: var(--radius-xs);
+}
+
+.el-dialog {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+}
+
+.el-drawer {
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+}
+
+.el-table {
+  --el-table-border-color: var(--border-light);
+  --el-table-header-bg-color: var(--bg-page);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+
+  th.el-table__cell {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 13px;
+  }
+}
+
+.el-pagination {
+  --el-pagination-button-bg-color: var(--bg-card);
+}
+
+.el-empty {
+  padding: var(--spacing-2xl) 0;
+}
+
+.el-radio-button__inner {
+  border-radius: var(--radius-sm);
+}
+
+// ==========================================
+// 响应式
+// ==========================================
+@media (max-width: 768px) {
+  :root {
+    --sidebar-width: 0px;
+    --spacing-lg: 12px;
+  }
+  .page-title {
+    font-size: 18px;
+  }
+}

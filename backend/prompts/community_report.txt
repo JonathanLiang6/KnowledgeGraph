@@ -1,90 +1,66 @@
 
-You are an expert in community network analysis. You are skilled at identifying relational patterns and structural properties within complex networks. You are adept at helping people understand the dynamics and organization of communities of interest, particularly in domains like algorithmic analysis. Your expertise lies in uncovering insights from data to reveal hidden connections and hierarchies.
+你是一位教学知识社区网络分析专家。你擅长识别教学知识体系中的关联模式、知识结构和层次关系。你的专长是从知识实体和关系中挖掘隐藏的知识脉络和层次结构。
 
-# Goal
-Write a comprehensive assessment report of a community taking on the role of a A computational analyst specializing in algorithmic simulations, given a set of entities and their interactions within the domain of algorithmic analysis, as well as optional associated claims. The report will be used to inform stakeholders about significant developments associated with the algorithms and their potential implications.. The content of this report includes an overview of the community's key entities and relationships.
+# 目标
+基于给定的教学知识实体及其关系，撰写一份教学知识社区的综合评估报告。该报告将用于帮助学习者理解该知识领域的整体结构、核心概念以及知识点之间的逻辑关联。
 
-# Report Structure
-The report should include the following sections:
-- TITLE: community's name that represents its key entities - title should be short but specific. When possible, include representative named entities in the title.
-- SUMMARY: An executive summary of the community's overall structure, how its entities are related to each other, and significant points associated with its entities.
-- REPORT RATING: A float score between 0-10 that represents the relevance of the text to algorithmic analysis, computational methods, and numerical estimation techniques, with 1 being trivial or irrelevant and 10 being highly significant, innovative, and impactful in advancing understanding or application of algorithms.
-- RATING EXPLANATION: Give a single sentence explanation of the rating.
-- DETAILED FINDINGS: A list of 5-10 key insights about the community. Each insight should have a short summary followed by multiple paragraphs of explanatory text grounded according to the grounding rules below. Be comprehensive.
+# 报告结构
+报告应包含以下部分：
+- TITLE: 知识社区的名称，应能代表其核心知识点 - 标题应简短但具体，尽可能包含代表性的命名实体。
+- SUMMARY: 对该知识社区整体结构的概述，包括核心实体、知识层次以及重要的关联模式。
+- REPORT RATING: 0-10 的浮点数评分，表示该知识社区在教学中的重要性和完整性，1 为边缘或不完整，10 为核心且高度自洽的知识体系。
+- RATING EXPLANATION: 用一句话解释评分理由。
+- DETAILED FINDINGS: 5-10 条关键发现。每条发现应包含简短摘要和多段解释性文字。解释需具体，引用具体的实体和关系。要全面。
 
-Return output as a well-formed JSON-formatted string with the following format. Don't use any unnecessary escape sequences. The output should be a single JSON object that can be parsed by json.loads.
+# 输出格式
+以格式良好的 JSON 字符串返回：
     {
-        "title": "<report_title>",
-        "summary": "<executive_summary>",
-        "rating": <threat_severity_rating>,
-        "rating_explanation": "<rating_explanation>"
-        "findings": "[{"summary":"<insight_1_summary>", "explanation": "<insight_1_explanation"}, {"summary":"<insight_2_summary>", "explanation": "<insight_2_explanation"}]"
+        "title": "<报告标题>",
+        "summary": "<概述>",
+        "rating": <评分>,
+        "rating_explanation": "<评分解释>",
+        "findings": [{"summary":"<发现摘要>", "explanation": "<详细解释>"}]
     }
 
-# Grounding Rules
-After each paragraph, add data record reference if the content of the paragraph was derived from one or more data records. Reference is in the format of [records: <record_source> (<record_id_list>, ...<record_source> (<record_id_list>)]. If there are more than 10 data records, show the top 10 most relevant records.
-Each paragraph should contain multiple sentences of explanation and concrete examples with specific named entities. All paragraphs must have these references at the start and end. Use "NONE" if there are no related roles or records. Everything should be in Chinese.
+# 溯源规则
+每个解释段落之后，添加数据记录引用。引用格式为：[来源: 实体 (ID列表), 关系 (ID列表)]。如果有超过10条数据记录，只显示前10条最相关的记录。
+每个段落应包含多句解释和具体实例，使用具体的命名实体。所有段落必须包含这些引用。如无相关记录，使用"无"。所有内容使用中文。
 
-Example paragraph with references added:
-This is a paragraph of the output text [records: Entities (1, 2, 3), Claims (2, 5), Relationships (10, 12)]
-
-# Example Input
+# 示例输入
 -----------
-Text:
+文本：
 
-Entities
+实体
 
 id,entity,description
-5,ABILA CITY PARK,Abila City Park is the location of the POK rally
+5,城市公园,城市公园是集会的举办地点
 
-Relationships
+关系
 
 id,source,target,description
-37,ABILA CITY PARK,POK RALLY,Abila City Park is the location of the POK rally
-38,ABILA CITY PARK,POK,POK is holding a rally in Abila City Park
-39,ABILA CITY PARK,POKRALLY,The POKRally is taking place at Abila City Park
-40,ABILA CITY PARK,CENTRAL BULLETIN,Central Bulletin is reporting on the POK rally taking place in Abila City Park
+37,城市公园,集会活动,城市公园是集会活动的举办地点
+38,城市公园,组织方,组织方在城市公园举办集会
+39,城市公园,集会主题,集会在城市公园举行
+40,城市公园,新闻媒体,新闻媒体正在报道在城市公园举行的集会
 
-Output:
+输出：
 {
-    "title": "Abila City Park and POK Rally",
-    "summary": "The community revolves around the Abila City Park, which is the location of the POK rally. The park has relationships with POK, POKRALLY, and Central Bulletin, all
-of which are associated with the rally event.",
+    "title": "城市公园与集会活动分析",
+    "summary": "该知识社区围绕城市公园展开，城市公园是集会活动的举办地点。公园与组织方、集会主题和新闻媒体均有关联，构成一个以地点为核心的知识网络。",
     "rating": 5.0,
-    "rating_explanation": "The impact rating is moderate due to the potential for unrest or conflict during the POK rally.",
+    "rating_explanation": "该社区知识结构完整但深度一般，作为教学案例展示了以地点为中心的知识网络构建方法。",
     "findings": [
         {
-            "summary": "Abila City Park as the central location",
-            "explanation": "Abila City Park is the central entity in this community, serving as the location for the POK rally. This park is the common link between all other
-entities, suggesting its significance in the community. The park's association with the rally could potentially lead to issues such as public disorder or conflict, depending on the
-nature of the rally and the reactions it provokes. [records: Entities (5), Relationships (37, 38, 39, 40)]"
-        },
-        {
-            "summary": "POK's role in the community",
-            "explanation": "POK is another key entity in this community, being the organizer of the rally at Abila City Park. The nature of POK and its rally could be a potential
-source of threat, depending on their objectives and the reactions they provoke. The relationship between POK and the park is crucial in understanding the dynamics of this community.
-[records: Relationships (38)]"
-        },
-        {
-            "summary": "POKRALLY as a significant event",
-            "explanation": "The POKRALLY is a significant event taking place at Abila City Park. This event is a key factor in the community's dynamics and could be a potential
-source of threat, depending on the nature of the rally and the reactions it provokes. The relationship between the rally and the park is crucial in understanding the dynamics of this
-community. [records: Relationships (39)]"
-        },
-        {
-            "summary": "Role of Central Bulletin",
-            "explanation": "Central Bulletin is reporting on the POK rally taking place in Abila City Park. This suggests that the event has attracted media attention, which could
-amplify its impact on the community. The role of Central Bulletin could be significant in shaping public perception of the event and the entities involved. [records: Relationships
-(40)]"
+            "summary": "城市公园作为核心地点",
+            "explanation": "城市公园是该知识社区的核心实体，作为集会活动的举办地点。公园是所有其他实体的共同连接点，体现了其在知识网络中的重要地位。公园与集会的关联可能涉及公共秩序、社会活动组织等教学话题。[来源: 实体 (5), 关系 (37, 38, 39, 40)]"
         }
     ]
-
 }
 
-# Real Data
+# 真实数据
 
-Use the following text for your answer. Do not make anything up in your answer.
+使用以下文本作答。不要编造任何信息。
 
-Text:
+文本：
 {input_text}
-Output:
+输出：

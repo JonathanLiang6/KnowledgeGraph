@@ -49,11 +49,17 @@ ENV/
 .DS_Store
 
 # ------------------------------------------
-# Database
+# Database & Vector Store (运行时数据 — 保留目录结构)
 # ------------------------------------------
 *.db
 *.sqlite
 *.sqlite3
+backend/data/lancedb/*
+backend/data/models/*
+backend/inputs/files/*
+# 保留目录结构
+!backend/data/lancedb/.gitkeep
+!backend/inputs/files/.gitkeep
 
 # ------------------------------------------
 # Logs
@@ -89,18 +95,12 @@ dist-ssr/
 *.local
 
 # ------------------------------------------
-# GraphRAG
-# ------------------------------------------
-output/
-input/
-*.parquet
-
-# ------------------------------------------
 # Cache
 # ------------------------------------------
 .cache/
 .pytest_cache/
 .mypy_cache/
+backend/cache/
 
 # ------------------------------------------
 # Testing

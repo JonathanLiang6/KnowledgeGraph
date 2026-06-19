@@ -10,6 +10,7 @@ export function chatCompletions(data) {
 }
 
 // 流式聊天 (SSE) - 使用相对路径通过 Vite 代理
+// v2.5: 修复行缓冲区 — 跨 chunk 边界的内容不再丢失
 export function chatCompletionsStream(data, onChunk, onDone, onError) {
   const controller = new AbortController()
 
@@ -26,15 +27,22 @@ export function chatCompletionsStream(data, onChunk, onDone, onError) {
       }
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
+      let lineBuffer = ''
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
         const text = decoder.decode(value, { stream: true })
-        const lines = text.split('\n')
+        lineBuffer += text
+        const lines = lineBuffer.split('\n')
+        // 最后一行可能不完整，保留在缓冲区等待下一 chunk
+        lineBuffer = lines.pop() || ''
 
-        for (const line of lines) {
+        for (const rawLine of lines) {
+          const line = rawLine.trim()
+          if (!line) continue
+
           if (line.startsWith('data: ')) {
             const data = line.slice(6)
             if (data === '[DONE]') {

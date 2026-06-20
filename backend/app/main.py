@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # ─── 启动 ───────────────────────────────────────────────
     logger.info("=" * 50)
-    logger.info("🚀 KnowledgeGraph v2.4 启动中...")
+    logger.info("🚀 KnowledgeGraph v3.0 启动中...")
     logger.info(f"   DeepSeek API: {config.DEEPSEEK_API_BASE}")
     logger.info(f"   Chat Model: {config.DEEPSEEK_CHAT_MODEL}")
     logger.info(f"   Embedding Model: {config.EMBEDDING_MODEL}")
@@ -124,28 +124,8 @@ async def health_check():
     from app.tasks.document_tasks import _active_processing_count
     return {
         "status": "healthy",
-        "version": "2.4.0",
+        "version": "3.0.0",
         "api_configured": config.is_api_key_set,
         "active_processing": _active_processing_count,
         "max_file_size_mb": config.MAX_FILE_SIZE_MB,
     }
-
-
-# ============================================================
-# 旧版兼容路由（从 v1 迁移过渡期使用）
-# ============================================================
-@app.get("/api/overview")
-async def legacy_overview():
-    """旧版概览接口 - 兼容过渡（后续移除）"""
-    return {
-        "system": "KnowledgeGraph v2.4.0",
-        "status": "running",
-        "message": "请使用 /api/v1/settings 获取系统信息",
-    }
-
-
-@app.get("/api/settings")
-async def legacy_settings():
-    """旧版设置接口 - 重定向提示"""
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/api/v1/settings")

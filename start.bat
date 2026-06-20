@@ -6,7 +6,7 @@ set BAK_WIN=KG-Backend
 
 echo.
 echo   ============================================
-echo     KnowledgeGraph v2.5
+echo     KnowledgeGraph v3.0 - Start Script
 echo   ============================================
 echo.
 

@@ -1,5 +1,5 @@
 # ============================================================
-# KnowledgeGraph v2.1 后端依赖
+# KnowledgeGraph v3.0 后端依赖
 # ============================================================
 
 # Web 框架
@@ -13,7 +13,7 @@ aiosqlite>=0.19.0
 
 # AI / LLM
 openai>=1.30.0          # DeepSeek V4 兼容 OpenAI SDK
-httpx>=0.26.0           # HTTP 客户端（OpenAI SDK 底层依赖）
+httpx>=0.27.0           # HTTP 客户端（OpenAI SDK 底层 + 测试）
 
 # Embedding / Reranker
 sentence-transformers>=2.7.0
@@ -24,34 +24,24 @@ rank-bm25>=0.2.2
 lancedb>=0.24.0
 pyarrow>=15.0.0
 
-# GraphRAG
-graphrag>=0.1.0
-
 # 数据处理
-pandas>=2.1.0
 numpy>=1.26.0
-tiktoken>=0.5.0
 
 # NLP
 jieba>=0.42.1
-spacy>=3.7.0
-nltk>=3.8.0
 
-# 文档解析 (v2.1 更新)
-pypdf>=4.0.0            # 替换 PyPDF2 — PDF 文本提取
+# 文档解析
+pypdf>=4.0.0            # PDF 文本提取
 python-docx>=1.1.0      # DOCX 解析
-python-pptx>=0.6.21     # PPTX 解析（新增）
-ebooklib>=0.18.0        # EPUB 解析（新增）
-filetype>=1.2.0         # MIME 类型检测（新增）
+python-pptx>=0.6.21     # PPTX 解析
+ebooklib>=0.18.0        # EPUB 解析
+filetype>=1.2.0         # MIME 类型检测
 
 # 工具
 pydantic>=2.5.0
 python-dotenv>=1.0.0
-pyyaml>=6.0.0
-aiohttp>=3.9.0
 
 # 测试
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
 pytest-httpx>=0.30.0
-httpx>=0.27.0

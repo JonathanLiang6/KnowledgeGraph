@@ -355,61 +355,6 @@ async def _graph_enhanced_search_async(
     return merged[:top_k]
 
 
-def _graph_enhanced_search(
-    query: str,
-    top_k: int,
-    use_rerank: bool,
-) -> List[SearchResult]:
-    """
-    GraphRAG 增强检索（同步版, 仅供内部非并发场景使用）：
-    1. 从 query 中匹配图谱实体
-    2. 用关联实体名扩展 query
-    3. 原始 query + 扩展 query 各检索一轮
-    4. RRF 融合两轮结果
-    """
-    t0 = time.monotonic()
-
-    # 1. 匹配图谱实体
-    matched = _extract_query_entities(query)
-
-    if not matched:
-        logger.debug("[GraphRAG] 未匹配到图谱实体，使用原始检索")
-        return _do_search(query, top_k, use_rerank)
-
-    # 2. 收集关联实体
-    expand_terms = []
-    seen_expand = set(matched)
-    for name in matched[:config.GRAPH_RAG_EXPAND_ENTITIES]:
-        info = _graph_entity_index.get(name, {})
-        for rel in info.get("related", [])[:5]:
-            if rel not in seen_expand:
-                expand_terms.append(rel)
-                seen_expand.add(rel)
-
-    if not expand_terms:
-        return _do_search(query, top_k, use_rerank)
-
-    # 3. 扩展查询
-    expanded_query = query + " " + " ".join(expand_terms[:5])
-    logger.debug(f"[GraphRAG] 匹配实体: {matched[:3]}, 扩展词: {expand_terms[:5]}")
-
-    # 4. 两轮检索
-    raw_results = _do_search(query, top_k, use_rerank)
-    exp_results = _do_search(expanded_query, top_k, use_rerank)
-
-    # 5. RRF 融合
-    merged = _rrf_fusion([raw_results, exp_results], k=60)
-    merged.sort(key=lambda r: r.score, reverse=True)
-
-    elapsed = (time.monotonic() - t0) * 1000
-    logger.debug(
-        f"[GraphRAG] 增强检索: raw={len(raw_results)} exp={len(exp_results)} "
-        f"merged={len(merged)} | {elapsed:.0f}ms"
-    )
-
-    return merged[:top_k]
-
-
 def _rrf_fusion(
     result_sets: List[List[SearchResult]],
     k: int = 60,

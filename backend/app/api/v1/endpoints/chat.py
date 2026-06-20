@@ -13,8 +13,8 @@ from sqlalchemy import select
 from app.core.database import get_db
 from app.core.config import config
 from app.models.document import Document
-from app.models.chat_history import ChatHistory
 from app.services.deepseek_client import DeepSeekClient
+from app.services.char_stream import char_stream
 from app.schemas.chat import (
     ChatRequest,
     ChatResponse,
@@ -112,15 +112,17 @@ async def _stream_response(chat_id: str, model: str, messages: List[dict],
         # 发送首帧
         yield f"data: {json.dumps({'id': chat_id, 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': model, 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
 
-        # 流式生成内容
+        # 流式生成内容 — 逐字符分类推送（打字机效果）
         full_content = ""
-        async for chunk in DeepSeekClient.chat_stream(
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
+        async for char_item in char_stream(
+            DeepSeekClient.chat_stream(
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
         ):
-            full_content += chunk
-            yield f"data: {json.dumps({'id': chat_id, 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': model, 'choices': [{'index': 0, 'delta': {'content': chunk}, 'finish_reason': None}]})}\n\n"
+            full_content += char_item["char"]
+            yield f"data: {json.dumps({'id': chat_id, 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': model, 'choices': [{'index': 0, 'delta': {'content': char_item['char'], 'char_type': char_item['type']}, 'finish_reason': None}]})}\n\n"
 
         # 发送结束帧
         yield f"data: {json.dumps({'id': chat_id, 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"

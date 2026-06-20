@@ -55,7 +55,11 @@
             <div class="msg-role-name">
               {{ msg.role === 'assistant' ? 'AI 助手' : '你' }}
             </div>
-            <div class="msg-text" v-html="renderMarkdown(msg.content)" />
+            <div
+              class="msg-text"
+              :class="{ 'msg-streaming': isStreaming && idx === messages.length - 1 && msg.role === 'assistant' }"
+              v-html="renderMessageContent(msg, idx)"
+            />
             <div v-if="msg.error" class="msg-error">
               <el-icon :size="14"><WarningFilled /></el-icon>
               {{ msg.error }}
@@ -63,8 +67,11 @@
           </div>
         </div>
 
-        <!-- 流式输出 -->
-        <div v-if="isStreaming" class="streaming-indicator">
+        <!-- 流式等待指示（收到首字节前显示，之后由打字机光标接管） -->
+        <div
+          v-if="isStreaming && messages.length > 0 && !messages[messages.length - 1].content"
+          class="streaming-indicator"
+        >
           <span class="streaming-dot" />
           <span class="streaming-text">AI 正在思考...</span>
         </div>
@@ -162,6 +169,111 @@ function renderMarkdown(text) {
   return marked.parse(safe)
 }
 
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/\n/g, '<br>')
+}
+
+function renderMessageContent(msg, idx) {
+  // 流式输出中或打字机队列仍在消耗：纯文本 + 闪烁光标
+  if (
+    (isStreaming.value || typewriterRunning.value) &&
+    idx === messages.value.length - 1 &&
+    msg.role === 'assistant'
+  ) {
+    const display = msg.content || ''
+    return escapeHtml(display) +
+      '<span class="typewriter-cursor">|</span>'
+  }
+  return renderMarkdown(msg.content)
+}
+
+// ─── 打字机队列系统 ────────────────────────────────────
+const typewriterQueue = []        // {char, type} — 非响应式数组（性能优化）
+const typewriterRunning = ref(false)
+let typewriterTimeoutId = null
+let lastAutoSave = 0
+
+// 速度映射表
+const TYPE_SPEEDS = {
+  chinese:     { baseMin: 5.6, baseMax: 8.3 },                // 12-18 chars/sec
+  code:        { baseMin: 11.1, baseMax: 22.2 },              // 4.5-9 chars/sec
+  normal:      { baseMin: 5.6, baseMax: 8.3 },                // similar to Chinese
+  punctuation: { baseMin: 6.7, baseMax: 8.3, pauseMin: 6.7, pauseMax: 13.3 },
+  newline:     { baseMin: 6.7, baseMax: 8.3, pauseMin: 10.0, pauseMax: 20.0 },
+}
+
+function getDelayForType(type) {
+  const cfg = TYPE_SPEEDS[type] || TYPE_SPEEDS.normal
+  const base = cfg.baseMin + Math.random() * (cfg.baseMax - cfg.baseMin)
+  let pause = 0
+  if (cfg.pauseMin !== undefined) {
+    pause = cfg.pauseMin + Math.random() * (cfg.pauseMax - cfg.pauseMin)
+  }
+  return { base, pause }
+}
+
+function enqueueChar(char, charType) {
+  typewriterQueue.push({ char, type: charType || 'normal' })
+  if (!typewriterRunning.value) {
+    typewriterRunning.value = true
+    const assistantMsg = messages.value[messages.value.length - 1]
+    if (assistantMsg && assistantMsg.role === 'assistant') {
+      processTypewriterQueue(assistantMsg)
+    }
+  }
+}
+
+function processTypewriterQueue(msg) {
+  if (!typewriterRunning.value) return
+
+  // 队列空 + 流已结束 → 最终化
+  if (typewriterQueue.length === 0) {
+    if (!isStreaming.value) {
+      typewriterRunning.value = false
+      if (msg && !msg.content) {
+        msg.content = '(AI 未返回内容)'
+      }
+      saveMessages()
+      scrollToBottom()
+      return
+    }
+    // 流还在进行中，轮询等待新字符
+    typewriterTimeoutId = setTimeout(() => processTypewriterQueue(msg), 25)
+    return
+  }
+
+  // 正常出队一个字符
+  const item = typewriterQueue.shift()
+  msg.content += item.char
+
+  const { base, pause } = getDelayForType(item.type)
+  const totalDelay = pause > 0 ? base + pause : base
+
+  // 每 5 秒自动保存（断网保护）
+  const now = Date.now()
+  if (now - lastAutoSave > 5000) {
+    saveMessages()
+    lastAutoSave = now
+  }
+
+  scrollToBottom()
+  typewriterTimeoutId = setTimeout(() => processTypewriterQueue(msg), totalDelay)
+}
+
+function cleanupTypewriter() {
+  typewriterQueue.length = 0
+  typewriterRunning.value = false
+  if (typewriterTimeoutId !== null) {
+    clearTimeout(typewriterTimeoutId)
+    typewriterTimeoutId = null
+  }
+}
+
 function autoResize() {
   const el = inputRef.value
   if (!el) return
@@ -232,23 +344,26 @@ async function sendMessage() {
       messages: chatMessages,
       kb_id: route.params.id || null,
     },
-    // onChunk
-    (chunk) => {
-      assistantMsg.content += chunk
-      scrollToBottom()
+    // onChunk — 逐字符入队，打字机队列自动驱动显示
+    (char, charType) => {
+      enqueueChar(char, charType)
     },
-    // onDone
+    // onDone — 流结束，队列处理器自动在耗尽后最终化
     () => {
       isStreaming.value = false
       streamController = null
-      if (!assistantMsg.content) {
-        assistantMsg.content = '(AI 未返回内容)'
+      // 如果队列已空且打字机未运行，手动最终化
+      if (typewriterQueue.length === 0 && !typewriterRunning.value) {
+        if (!assistantMsg.content) {
+          assistantMsg.content = '(AI 未返回内容)'
+        }
+        saveMessages()
+        scrollToBottom()
       }
-      saveMessages()
-      scrollToBottom()
     },
-    // onError
+    // onError — 清空队列，保留已显示内容
     (err) => {
+      cleanupTypewriter()
       assistantMsg.error = err.message || '请求失败'
       isStreaming.value = false
       streamController = null
@@ -264,10 +379,23 @@ function stopStreaming() {
     streamController = null
   }
   isStreaming.value = false
-  // 给最后一条 assistant 消息收尾
+
   const last = messages.value[messages.value.length - 1]
-  if (last && last.role === 'assistant' && !last.content) {
-    last.content = '(已中断)'
+  if (last && last.role === 'assistant') {
+    // 立即 flush 队列中剩余字符
+    if (typewriterQueue.length > 0) {
+      while (typewriterQueue.length > 0) {
+        last.content += typewriterQueue.shift().char
+      }
+    }
+    if (!last.content && typewriterQueue.length === 0 && !typewriterRunning.value) {
+      last.content = '(已中断)'
+    }
+  }
+  typewriterRunning.value = false
+  if (typewriterTimeoutId !== null) {
+    clearTimeout(typewriterTimeoutId)
+    typewriterTimeoutId = null
   }
   saveMessages()
   ElMessage.info('已停止生成')
@@ -286,6 +414,7 @@ async function clearChat() {
     }
   }
   if (isStreaming.value) stopStreaming()
+  cleanupTypewriter()
   messages.value = []
   try { localStorage.removeItem(`chat_${route.params.id}`) } catch { /* ignore */ }
   inputRef.value?.focus()
@@ -302,6 +431,7 @@ onMounted(() => {
 watch(() => route.params.id, (n, o) => {
   if (n !== o) {
     if (isStreaming.value) stopStreaming()
+    cleanupTypewriter()
     messages.value = []
     loadMessages()
   }
@@ -309,6 +439,7 @@ watch(() => route.params.id, (n, o) => {
 
 onBeforeUnmount(() => {
   if (isStreaming.value) stopStreaming()
+  cleanupTypewriter()
 })
 </script>
 
@@ -522,6 +653,21 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 5px;
+}
+
+// 打字机光标闪烁
+:deep(.typewriter-cursor) {
+  display: inline-block;
+  vertical-align: text-bottom;
+  font-weight: 300;
+  color: var(--color-primary);
+  animation: cursor-blink 0.8s step-end infinite;
+  margin-left: 1px;
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 // 流式指示器

@@ -144,38 +144,45 @@ async def _process_document(doc_id: str, filepath: str, task_id: str):
                 await _update_doc_status(db, doc, status, progress)
 
                 try:
+                    # 每个阶段独立超时（默认 30 分钟总超时，每阶段 5 分钟）
+                    stage_timeout = max(60, config.DOCUMENT_PROCESSING_TIMEOUT_MINUTES * 60 // len(PROCESSING_STAGES))
                     if stage_key == "parsing":
-                        word_count, token_count, cached_content = await _stage_parsing(
-                            db, doc, filepath, task_id
+                        word_count, token_count, cached_content = await asyncio.wait_for(
+                            _stage_parsing(db, doc, filepath, task_id), timeout=stage_timeout
                         )
                     elif stage_key == "nlp_extract":
                         await _ensure_content()
-                        result_graph = await _stage_nlp_extract(
-                            db, doc, cached_content, task_id
+                        result_graph = await asyncio.wait_for(
+                            _stage_nlp_extract(db, doc, cached_content, task_id), timeout=stage_timeout
                         )
                     elif stage_key == "llm_refine":
                         await _ensure_content()
-                        refined_graph = await _stage_llm_refine(
-                            db, doc, cached_content, result_graph, task_id
+                        refined_graph = await asyncio.wait_for(
+                            _stage_llm_refine(db, doc, cached_content, result_graph, task_id), timeout=stage_timeout
                         )
                     elif stage_key == "chunking":
                         await _ensure_content()
-                        chunks = await _stage_chunking(
-                            db, doc, cached_content, refined_graph, task_id
+                        chunks = await asyncio.wait_for(
+                            _stage_chunking(db, doc, cached_content, refined_graph, task_id), timeout=stage_timeout
                         )
                     elif stage_key == "embedding":
-                        await _stage_embedding(db, doc, chunks, task_id)
+                        await asyncio.wait_for(
+                            _stage_embedding(db, doc, chunks, task_id), timeout=stage_timeout
+                        )
                     elif stage_key == "indexing":
-                        await _stage_indexing(db, doc, chunks, task_id)
+                        await asyncio.wait_for(
+                            _stage_indexing(db, doc, chunks, task_id), timeout=stage_timeout
+                        )
 
                     # 每个阶段完成后立即提交，持久化进度
                     await db.commit()
 
                 except asyncio.TimeoutError:
+                    logger.error(f"阶段 [{stage_key}] 超时 ({stage_timeout}s)")
+                    update_task(task_id, status="failed", error=f"阶段 [{stage_key}] 超时", stage=label)
                     raise
                 except Exception as stage_error:
                     logger.error(f"阶段 [{stage_key}] 失败: {stage_error}")
-                    # 保留部分进度到 DB
                     await db.commit()
                     raise
 
@@ -183,16 +190,19 @@ async def _process_document(doc_id: str, filepath: str, task_id: str):
 
             final_graph = refined_graph if refined_graph else result_graph
             if final_graph:
-                doc.graph_data = final_graph  # v2.4: JSON 列自动序列化
-                # 更新 GraphRAG 实体索引
+                doc.graph_data = final_graph  # v2.4: JSON 列自动序列化（向后兼容）
+                # Phase 1: 持久化到独立图存储 (GraphEntity + GraphRelation)
                 try:
-                    from app.services.rag_service import update_graph_index
-                    update_graph_index(
-                        final_graph.get("nodes", []),
-                        final_graph.get("links", []),
+                    from app.services.graph_service import GraphService
+                    await GraphService.build_graph(
+                        db=db,
+                        kb_id=doc.kb_id,
+                        nodes=final_graph.get("nodes", []),
+                        links=final_graph.get("links", []),
+                        doc_id=doc.id,
                     )
                 except Exception as e:
-                    logger.warning(f"更新图谱索引失败: {e}")
+                    logger.warning(f"图谱持久化失败（不影响文档处理）: {e}")
             doc.status = DocumentStatus.DONE
             doc.progress = 100.0
             doc.processed_at = datetime.now()

@@ -1,5 +1,5 @@
 """
-知识图谱 API - 图谱数据、实体详情
+知识图谱 API - 图谱数据、实体详情、路径查询、社区检测 (Phase 1)
 """
 import json
 import logging
@@ -9,10 +9,119 @@ from sqlalchemy import select
 from app.core.database import get_db
 from app.core.colors import TYPE_COLORS, get_color_for_type, get_legend
 from app.models.document import Document
-from app.schemas.graph import GraphData, GraphNode, GraphLink, EntityDetail
+from app.schemas.graph import (
+    GraphData, GraphNode, GraphLink, EntityDetail,
+    GraphPath, PathsResponse, CommunityInfo, CommunityDetail,
+    CommunitiesResponse, NeighborInfo, GraphStats,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/graph", tags=["知识图谱"])
+
+
+# ── Phase 1: 新增 GraphRAG API 端点 ──────────────────────────
+# 注意: /entity/{entity_id}/neighbors 必须在 /entity/{entity_id} 之前定义
+
+
+@router.get("/paths")
+async def find_paths(
+    source: str = Query(..., description="起始实体ID"),
+    target: str = Query(..., description="目标实体ID"),
+    kb_id: str = Query(..., description="知识库ID"),
+    max_hops: int = Query(3, ge=1, le=6, description="最大跳数"),
+    db: AsyncSession = Depends(get_db),
+):
+    """查询两个实体之间的所有路径（多跳推理）"""
+    from app.services.graph_service import GraphService
+
+    paths = await GraphService.find_paths(db, source, target, kb_id, max_hops)
+    formatted = [
+        GraphPath(
+            path=p["path"], relations=p["relations"],
+            length=p["length"], total_weight=p["total_weight"],
+        )
+        for p in paths
+    ]
+    return PathsResponse(source=source, target=target, paths=formatted, count=len(formatted))
+
+
+@router.get("/communities")
+async def get_communities(
+    kb_id: str = Query(..., description="知识库ID"),
+    min_size: int = Query(None, description="最小社区节点数"),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取知识图谱的 Louvain 社区检测结果"""
+    from app.services.graph_service import GraphService
+
+    communities = await GraphService.detect_communities(db, kb_id, min_size)
+    formatted = [
+        CommunityInfo(
+            id=c["id"], label=c["label"], node_ids=c["node_ids"],
+            node_count=c["node_count"], top_entities=c["top_entities"],
+            description=c.get("description", ""),
+        )
+        for c in communities
+    ]
+    return CommunitiesResponse(kb_id=kb_id, communities=formatted, count=len(formatted))
+
+
+@router.get("/communities/{community_id}")
+async def get_community_detail(
+    community_id: str,
+    kb_id: str = Query(..., description="知识库ID"),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取指定社区的详细信息（含所有节点和边）"""
+    from app.services.graph_service import GraphService
+
+    detail = await GraphService.get_community_summary(db, community_id, kb_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="社区不存在")
+    return CommunityDetail(**detail)
+
+
+@router.get("/entity/{entity_id}/neighbors")
+async def get_entity_neighbors(
+    entity_id: str,
+    kb_id: str = Query(None, description="知识库ID"),
+    hops: int = Query(1, ge=1, le=3, description="跳数"),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取实体的邻居子图（BFS 展开）"""
+    from app.services.graph_service import GraphService
+
+    result = await GraphService.get_neighbors(db, entity_id, kb_id, hops)
+    if not result:
+        raise HTTPException(status_code=404, detail="实体不存在")
+    return NeighborInfo(**result)
+
+
+@router.post("/cleanup-orphans")
+async def cleanup_orphan_nodes(
+    kb_id: str = Query(..., description="知识库ID"),
+    db: AsyncSession = Depends(get_db),
+):
+    """v3.2: 清理知识库中无法建立任何链接的孤立节点"""
+    from app.services.graph_service import GraphService
+
+    result = await GraphService.clean_orphan_nodes(db, kb_id)
+    return {"status": "ok", "kb_id": kb_id, "deleted": result["deleted"]}
+
+
+@router.get("/stats")
+async def get_graph_stats(
+    kb_id: str = Query(None, description="知识库ID（可选，不传则返回全局统计）"),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取知识图谱统计信息"""
+    from app.services.graph_service import GraphService
+
+    stats = await GraphService.get_graph_stats(db, kb_id)
+    return GraphStats(**stats)
+
+
+# ── 现有端点（向后兼容）──────────────────────────────────────
 
 
 @router.get("/data", response_model=GraphData)

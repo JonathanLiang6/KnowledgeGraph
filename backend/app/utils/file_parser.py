@@ -1,6 +1,7 @@
 """
-文档解析器 - 支持 PDF, DOCX, PPTX, Markdown, HTML, EPUB, TXT
+文档解析器 - 支持 PDF, DOCX, PPTX, Markdown, HTML, EPUB, TXT, 图像 (v3.2 Q3)
 修复：PyPDF2 → pypdf、编码检测、流式读取、容错解析
+v3.2: + ImageParser (PaddleOCR + BLIP Captioning)
 """
 import os
 import io
@@ -10,7 +11,7 @@ from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# 支持的文件扩展名 → MIME 类型映射
+# 支持的文件扩展名 → MIME 类型映射 (v3.2: + 图像类型)
 EXT_TO_TYPE: dict = {
     ".txt": "Text",
     ".md": "Markdown",
@@ -21,7 +22,14 @@ EXT_TO_TYPE: dict = {
     ".html": "HTML",
     ".htm": "HTML",
     ".epub": "EPUB",
+    ".jpg": "Image",
+    ".jpeg": "Image",
+    ".png": "Image",
+    ".webp": "Image",
 }
+
+# 图像扩展名集合
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 def read_file_content(filepath: str) -> Optional[str]:
@@ -49,6 +57,10 @@ def read_file_content(filepath: str) -> Optional[str]:
         ".docx": _read_docx,
         ".pptx": _read_pptx,
         ".epub": _read_epub,
+        ".jpg": _read_image,
+        ".jpeg": _read_image,
+        ".png": _read_image,
+        ".webp": _read_image,
     }
 
     parser = parsers.get(ext)
@@ -233,6 +245,96 @@ def _strip_html(html: str) -> str:
     html = re.sub(r'[ \t]+', ' ', html)
     html = re.sub(r'\n{3,}', '\n\n', html)
     return html.strip()
+
+
+# ─── 图像 (PaddleOCR + BLIP Captioning) ────────────────────────────
+
+# 模块级模型缓存（懒加载）
+_ocr_model = None
+_blip_model = None
+_blip_processor = None
+
+
+def _get_ocr():
+    """懒加载 PaddleOCR 模型"""
+    global _ocr_model
+    if _ocr_model is None:
+        try:
+            from paddleocr import PaddleOCR
+            _ocr_model = PaddleOCR(lang='ch', use_angle_cls=False, show_log=False)
+            logger.info("PaddleOCR 模型加载完成")
+        except ImportError:
+            logger.warning("PaddleOCR 未安装，图像 OCR 功能不可用")
+            return None
+    return _ocr_model
+
+
+def _get_blip():
+    """懒加载 BLIP 图像描述模型"""
+    global _blip_model, _blip_processor
+    if _blip_model is None:
+        try:
+            from transformers import BlipProcessor, BlipForConditionalGeneration
+            _blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+            _blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+            logger.info("BLIP 图像描述模型加载完成")
+        except ImportError:
+            logger.warning("transformers 未安装，BLIP 图像描述功能不可用")
+            return None, None
+        except Exception as e:
+            logger.warning(f"BLIP 模型加载失败: {e}")
+            return None, None
+    return _blip_processor, _blip_model
+
+
+def _read_image(filepath: str) -> str:
+    """
+    读取图像文件，提取文本和语义信息。
+
+    使用 PaddleOCR 提取文字 + BLIP 生成图片描述。
+    返回拼接的文本: [OCR文字]：{ocr_text}。 [图片描述]：{caption_text}
+    """
+    from PIL import Image
+
+    parts = []
+
+    # Step 1: OCR 文字提取
+    ocr = _get_ocr()
+    if ocr is not None:
+        try:
+            result = ocr.ocr(filepath)
+            ocr_texts = []
+            if result and result[0]:
+                for line in result[0]:
+                    if line and len(line) >= 2:
+                        text = line[1][0] if isinstance(line[1], (list, tuple)) else str(line[1])
+                        if text and text.strip():
+                            ocr_texts.append(text.strip())
+            if ocr_texts:
+                parts.append(f"[OCR文字]：{'；'.join(ocr_texts)}")
+        except Exception as e:
+            logger.warning(f"OCR 识别失败 {filepath}: {e}")
+
+    # Step 2: BLIP 图像描述
+    processor, model = _get_blip()
+    if processor is not None and model is not None:
+        try:
+            image = Image.open(filepath).convert("RGB")
+            inputs = processor(image, return_tensors="pt")
+            out = model.generate(**inputs, max_new_tokens=50)
+            caption = processor.decode(out[0], skip_special_tokens=True)
+            if caption and caption.strip():
+                parts.append(f"[图片描述]：{caption.strip()}")
+        except Exception as e:
+            logger.warning(f"BLIP 图像描述失败 {filepath}: {e}")
+
+    if not parts:
+        logger.warning(f"图像无有效内容: {filepath}")
+        return ""
+
+    result = "。 ".join(parts)
+    logger.info(f"图像解析完成: {filepath}, 内容长度={len(result)}")
+    return result
 
 
 # ─── 文件信息 ─────────────────────────────────────────────────────

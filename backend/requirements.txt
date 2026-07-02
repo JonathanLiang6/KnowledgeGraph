@@ -1,5 +1,5 @@
 # ============================================================
-# KnowledgeGraph v3.0 后端依赖
+# KnowledgeGraph v3.2 后端依赖
 # ============================================================
 
 # Web 框架
@@ -24,6 +24,10 @@ rank-bm25>=0.2.2
 lancedb>=0.24.0
 pyarrow>=15.0.0
 
+# 图计算 (Phase 1: GraphRAG 基础)
+networkx>=3.0
+python-louvain>=0.16
+
 # 数据处理
 numpy>=1.26.0
 
@@ -36,6 +40,15 @@ python-docx>=1.1.0      # DOCX 解析
 python-pptx>=0.6.21     # PPTX 解析
 ebooklib>=0.18.0        # EPUB 解析
 filetype>=1.2.0         # MIME 类型检测
+
+# v3.2: Q3 多模态图像处理
+paddlepaddle>=3.0.0     # PaddlePaddle CPU (OCR)
+paddleocr>=2.9.0        # PaddleOCR 中文识别
+Pillow>=10.0.0          # 图像处理
+transformers>=4.40.0    # BLIP 图像描述
+
+# v3.2: Q8 联网搜索
+duckduckgo-search>=5.0  # DuckDuckGo 免费搜索
 
 # 工具
 pydantic>=2.5.0

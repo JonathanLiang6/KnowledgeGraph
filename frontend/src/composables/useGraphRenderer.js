@@ -58,6 +58,7 @@ export function useGraphRenderer(canvasRef, width, height, onNodeClick) {
     canvas.style.width = width.value + 'px'
     canvas.style.height = height.value + 'px'
     ctx = canvas.getContext('2d')
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.scale(dpr, dpr)
 
     // Zoom
@@ -309,6 +310,25 @@ export function useGraphRenderer(canvasRef, width, height, onNodeClick) {
     ctx.restore()
   }
 
+  function updateData(data, scale = 1.0) {
+    if (simulation) simulation.stop()
+    sizeScale = scale
+    // 更新数据
+    allNodes = data.nodes.map((n, i) => ({
+      ...n,
+      x: n.x || (width.value / 2 + (Math.random() - 0.5) * 200),
+      y: n.y || (height.value / 2 + (Math.random() - 0.5) * 200),
+      index: i,
+    }))
+    allLinks = data.links.map(l => ({
+      ...l,
+      source: allNodes.find(n => n.id === l.source) || l.source,
+      target: allNodes.find(n => n.id === l.target) || l.target,
+    }))
+    applyFilters()
+    startSimulation()
+  }
+
   function stop() {
     if (simulation) simulation.stop()
   }
@@ -320,11 +340,11 @@ export function useGraphRenderer(canvasRef, width, height, onNodeClick) {
     canvas.height = h * dpr
     canvas.style.width = w + 'px'
     canvas.style.height = h + 'px'
-    if (ctx) { ctx.scale(dpr, dpr); draw() }
+    if (ctx) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.scale(dpr, dpr); draw() }
   }
 
   return {
-    init, stop, resize, draw,
+    init, updateData, stop, resize, draw,
     setNodeSizeScale, setHiddenTypes, setMinWeight, centerOn,
   }
 }

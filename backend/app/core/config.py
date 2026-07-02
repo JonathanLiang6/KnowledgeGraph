@@ -1,7 +1,13 @@
 """
 核心配置模块 - 所有配置从 .env 读取，前端不可见 API 密钥
-v2.4: 安全的 env var 解析 + set 类型优化
+v3.1: 安全的 env var 解析 + set 类型优化 + 版本号统一 + 占位符检测
 """
+
+# 应用版本号 — 单一真实来源
+APP_VERSION = "4.0.0"
+
+# API 密钥占位符前缀 — 以此前缀开头的视为未配置
+_API_KEY_PLACEHOLDER_PREFIX = "your-"
 import os
 import logging
 from pathlib import Path
@@ -73,22 +79,12 @@ class Config:
     LLM_MAX_RETRIES: int = _safe_int("LLM_MAX_RETRIES", "3")
 
     # ========================
-    # GraphRAG 配置
-    # ========================
-    GRAPHRAG_INPUT_DIR: str = os.getenv("GRAPHRAG_INPUT_DIR", "input")
-    GRAPHRAG_CACHE_DIR: str = os.getenv("GRAPHRAG_CACHE_DIR", "cache")
-    GRAPHRAG_STORAGE_DIR: str = os.getenv("GRAPHRAG_STORAGE_DIR", "inputs/artifacts")
-    GRAPHRAG_REPORTING_DIR: str = os.getenv("GRAPHRAG_REPORTING_DIR", "inputs/reports")
-    GRAPHRAG_PROMPTS_DIR: str = os.getenv("GRAPHRAG_PROMPTS_DIR", "prompts")
-    COMMUNITY_LEVEL: int = _safe_int("COMMUNITY_LEVEL", "2")
-
-    # ========================
     # 分块参数
     # ========================
     CHUNK_SIZE: int = _safe_int("CHUNK_SIZE", "800")
-    CHUNK_OVERLAP: int = _safe_int("CHUNK_OVERLAP", "50")
-    PARENT_CHUNK_SIZE: int = _safe_int("PARENT_CHUNK_SIZE", "800")
-    CHILD_CHUNK_SIZE: int = _safe_int("CHILD_CHUNK_SIZE", "200")
+    CHUNK_OVERLAP: int = _safe_int("CHUNK_OVERLAP", "100")
+    PARENT_CHUNK_SIZE: int = _safe_int("PARENT_CHUNK_SIZE", "1200")
+    CHILD_CHUNK_SIZE: int = _safe_int("CHILD_CHUNK_SIZE", "300")
 
     # ========================
     # 文件上传限制 (P0 安全加固)
@@ -104,9 +100,11 @@ class Config:
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "text/html",
         "application/epub+zip",
+        "image/jpeg", "image/png", "image/webp",  # v3.2: Q3 多模态图像支持
     }
     ALLOWED_EXTENSIONS: set = {
         ".txt", ".md", ".markdown", ".pdf", ".docx", ".pptx", ".html", ".htm", ".epub",
+        ".jpg", ".jpeg", ".png", ".webp",  # v3.2: Q3 多模态图像支持
     }
     # 是否启用文件去重（基于 SHA256）
     ENABLE_FILE_DEDUP: bool = os.getenv("ENABLE_FILE_DEDUP", "true").lower() == "true"
@@ -126,20 +124,23 @@ class Config:
     BM25_INCREMENTAL_THRESHOLD: int = _safe_int("BM25_INCREMENTAL_THRESHOLD", "10")
 
     # ========================
-    # 提示词文件路径
+    # GraphRAG Phase 1: 图检索与社区检测配置
     # ========================
-    PROMPT_ENTITY_EXTRACTION: str = os.getenv(
-        "GRAPHRAG_ENTITY_EXTRACTION_PROMPT_FILE", "prompts/entity_extraction.txt"
-    )
-    PROMPT_SUMMARIZE_DESCRIPTIONS: str = os.getenv(
-        "GRAPHRAG_SUMMARIZE_DESCRIPTIONS_PROMPT_FILE", "prompts/summarize_descriptions.txt"
-    )
-    PROMPT_CLAIM_EXTRACTION: str = os.getenv(
-        "GRAPHRAG_CLAIM_EXTRACTION_PROMPT_FILE", "prompts/claim_extraction.txt"
-    )
-    PROMPT_COMMUNITY_REPORT: str = os.getenv(
-        "GRAPHRAG_COMMUNITY_REPORT_PROMPT_FILE", "prompts/community_report.txt"
-    )
+    GRAPH_TRAVERSAL_MAX_HOPS: int = _safe_int("GRAPH_TRAVERSAL_MAX_HOPS", "3")
+    GRAPH_TRAVERSAL_MAX_NODES: int = _safe_int("GRAPH_TRAVERSAL_MAX_NODES", "50")
+    GRAPH_TRAVERSAL_STRATEGY: str = os.getenv("GRAPH_TRAVERSAL_STRATEGY", "bfs")
+    GRAPH_COMMUNITY_MIN_SIZE: int = _safe_int("GRAPH_COMMUNITY_MIN_SIZE", "3")
+    GRAPH_ENTITY_RESOLUTION_THRESHOLD: float = _safe_float("GRAPH_ENTITY_RESOLUTION_THRESHOLD", "0.85")
+    GRAPH_GLOBAL_SEARCH_TOP_COMMUNITIES: int = _safe_int("GRAPH_GLOBAL_SEARCH_TOP_COMMUNITIES", "5")
+    GRAPH_RETRIEVAL_WEIGHT: float = _safe_float("GRAPH_RETRIEVAL_WEIGHT", "0.3")
+
+    # ========================
+    # Phase 2: Agent 配置
+    # ========================
+    AGENT_MAX_STEPS: int = _safe_int("AGENT_MAX_STEPS", "6")
+    AGENT_TEMPERATURE: float = _safe_float("AGENT_TEMPERATURE", "0.3")
+    AGENT_MAX_TOKENS: int = _safe_int("AGENT_MAX_TOKENS", "2048")
+    AGENT_MEMORY_MAX_TURNS: int = _safe_int("AGENT_MEMORY_MAX_TURNS", "5")
 
     # ========================
     # 数据配置
@@ -179,8 +180,12 @@ class Config:
 
     @property
     def is_api_key_set(self) -> bool:
-        """检查 DeepSeek API 密钥是否已配置"""
-        return bool(self.DEEPSEEK_API_KEY and self.DEEPSEEK_API_KEY != "your-api-key-here")
+        """检查 DeepSeek API 密钥是否已配置（前缀匹配占位符）"""
+        return bool(
+            self.DEEPSEEK_API_KEY
+            and not self.DEEPSEEK_API_KEY.startswith(_API_KEY_PLACEHOLDER_PREFIX)
+            and len(self.DEEPSEEK_API_KEY) > 10
+        )
 
     def get_api_config(self) -> dict:
         """获取 API 配置（仅供后端使用，不暴露给前端）"""

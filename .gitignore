@@ -1,129 +1,85 @@
 # ==========================================
-# Python Project .gitignore
+# KnowledgeGraph v4.0 — .gitignore
 # ==========================================
 
-# ------------------------------------------
-# Python Runtime
-# ------------------------------------------
+# ── Python Runtime ──────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 
-# ------------------------------------------
-# Build and Distribution
-# ------------------------------------------
+# ── Build & Distribution ────────────────────
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
+wheels/
 
-# ------------------------------------------
-# Virtual Environment
-# ------------------------------------------
+# ── Virtual Environment ────────────────────
 venv/
 env/
-ENV/
 .venv/
+*.venv/
 
-# ------------------------------------------
-# IDE and Editor
-# ------------------------------------------
+# ── IDE / Editor ───────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 .DS_Store
+Thumbs.db
 
-# ------------------------------------------
-# Database & Vector Store (运行时数据 — 保留目录结构)
-# ------------------------------------------
-*.db
-*.db-shm
-*.db-wal
-*.sqlite
-*.sqlite3
-backend/data/lancedb/*
-backend/data/models/*
-backend/inputs/files/*
-# 保留目录结构
+# ── Runtime Data (数据库、向量索引、模型缓存) ──
+backend/data/**
+!backend/data/.gitkeep
+!backend/data/lancedb/
 !backend/data/lancedb/.gitkeep
+!backend/data/models/
+!backend/data/models/.gitkeep
+
+# ── Uploaded Files ─────────────────────────
+backend/inputs/files/**
+!backend/inputs/files/
 !backend/inputs/files/.gitkeep
 
-# ------------------------------------------
-# Logs
-# ------------------------------------------
-*.log
-logs/
-
-# ------------------------------------------
-# Environment Variables
-# ------------------------------------------
+# ── Environment & Secrets ──────────────────
 .env
-.env.local
-.env.*.local
-.env.development
-.env.production
-
-# ------------------------------------------
-# API Keys and Secrets
-# ------------------------------------------
+.env.*
+!.env.example
 *.key
 *.pem
 secrets.json
 credentials.json
-config.local.yaml
-config.prod.yaml
 
-# ------------------------------------------
-# Frontend
-# ------------------------------------------
-node_modules/
-dist/
-dist-ssr/
-*.local
+# ── Frontend ───────────────────────────────
+frontend/node_modules/
+frontend/dist/
 
-# ------------------------------------------
-# Cache
-# ------------------------------------------
+# ── Logs & Cache ───────────────────────────
+*.log
+logs/
 .cache/
 .pytest_cache/
 .mypy_cache/
-backend/cache/
+.ruff_cache/
+*.db-journal
 
-# ------------------------------------------
-# Testing
-# ------------------------------------------
+# ── Testing ────────────────────────────────
 .coverage
 htmlcov/
+.coverage.*
 
-# ------------------------------------------
-# Jupyter Notebook
-# ------------------------------------------
-.ipynb_checkpoints
+# ── Jupyter ────────────────────────────────
+.ipynb_checkpoints/
 
-# ------------------------------------------
-# Temporary Files
-# ------------------------------------------
+# ── OS ─────────────────────────────────────
+Desktop.ini
+$RECYCLE.BIN/
+
+# ── Temporary ──────────────────────────────
 *.tmp
 *.temp
-temp/
 tmp/
-
-# ------------------------------------------
-# Operating System
-# ------------------------------------------
-Thumbs.db
+temp/

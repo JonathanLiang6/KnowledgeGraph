@@ -1,29 +1,82 @@
-.PHONY: install dev test lint clean
+.PHONY: help install dev dev-backend test lint format typecheck clean docker-build docker-up docker-down
 
-# 安装依赖
+# ── 帮助 ───────────────────────────────────────────────────────
+help:
+	@echo "KnowledgeGraph v3.1 — 可用目标:"
+	@echo ""
+	@echo "  开发:"
+	@echo "    make install       安装所有依赖"
+	@echo "    make dev           启动开发环境（后端 + 前端）"
+	@echo "    make dev-backend   仅启动后端"
+	@echo ""
+	@echo "  测试:"
+	@echo "    make test          运行 pytest"
+	@echo ""
+	@echo "  代码质量:"
+	@echo "    make lint          Ruff 检查 + 格式检查"
+	@echo "    make format        Ruff 自动修复 + 格式化"
+	@echo "    make typecheck     mypy 类型检查"
+	@echo ""
+	@echo "  Docker:"
+	@echo "    make docker-build  构建 Docker 镜像"
+	@echo "    make docker-up     启动 Docker 服务"
+	@echo "    make docker-down   停止 Docker 服务"
+	@echo ""
+	@echo "  清理:"
+	@echo "    make clean         清理所有缓存"
+
+# ── 安装依赖 ─────────────────────────────────────────────────
 install:
 	cd backend && pip install -r requirements.txt
 	cd frontend && npm install
 
-# 启动开发环境
+# ── 启动开发环境 ─────────────────────────────────────────────
 dev:
-	cd backend && python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8013 &
-	cd frontend && npm run dev
+	@trap 'kill 0; echo "  All stopped."' EXIT; \
+	cd backend && python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8013 & \
+	cd frontend && npm run dev; \
+	wait
 
 # 仅启动后端
 dev-backend:
 	cd backend && python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8013
 
-# 运行测试
+# ── 测试 ─────────────────────────────────────────────────────
 test:
 	cd backend && python -m pytest tests/ -v
 
-# 代码检查
+# ── 代码检查 ─────────────────────────────────────────────────
 lint:
 	cd backend && python -m ruff check app/
+	cd backend && python -m ruff format --check app/
 
-# 清理
+# 代码格式化
+format:
+	cd backend && python -m ruff check --fix app/
+	cd backend && python -m ruff format app/
+
+# ── 类型检查 ─────────────────────────────────────────────────
+typecheck:
+	cd backend && python -m mypy app/
+
+# ── Docker ────────────────────────────────────────────────────
+docker-build:
+	docker build -t knowledge-graph:latest .
+
+docker-up:
+	docker-compose up -d
+
+docker-down:
+	docker-compose down
+
+# ── 清理 ─────────────────────────────────────────────────────
 clean:
-	find backend -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find backend -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
-	rm -rf frontend/node_modules/.cache 2>/dev/null || true
+	@echo "Cleaning Python cache..."
+	@python -c "import os, shutil; [shutil.rmtree(os.path.join(r,d), ignore_errors=True) for r,_,fs in os.walk('backend') for d in fs if d == '__pycache__']" 2>/dev/null; true
+	@python -c "import os; [os.remove(os.path.join(r,f)) for r,_,fs in os.walk('backend') for f in fs if f.endswith('.pyc')]" 2>/dev/null; true
+	@python -c "import shutil; shutil.rmtree('backend/.pytest_cache', ignore_errors=True)" 2>/dev/null; true
+	@python -c "import shutil; shutil.rmtree('backend/.ruff_cache', ignore_errors=True)" 2>/dev/null; true
+	@python -c "import shutil; shutil.rmtree('backend/.mypy_cache', ignore_errors=True)" 2>/dev/null; true
+	@echo "Cleaning frontend cache..."
+	@python -c "import shutil; shutil.rmtree('frontend/node_modules/.cache', ignore_errors=True)" 2>/dev/null; true
+	@echo "Done."

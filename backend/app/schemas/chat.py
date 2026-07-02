@@ -1,8 +1,6 @@
 """
 聊天 Pydantic Schemas
-v2.4: ChatHistoryResponse + from_attributes
 """
-from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
@@ -14,13 +12,15 @@ class Message(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """聊天请求 - OpenAI 兼容格式"""
+    """聊天请求 - OpenAI 兼容格式 (v3.2: + enable_web)"""
     model: str = Field("deepseek-chat", description="模型名称")
     messages: List[Message] = Field(..., description="对话消息列表")
     temperature: Optional[float] = Field(1.0, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(4096, ge=1, le=32768)
     stream: Optional[bool] = Field(False, description="是否流式输出")
-    kb_id: Optional[str] = Field(None, description="知识库ID(可选，用于RAG模式)")
+    kb_id: Optional[str] = Field(None, description="知识库ID(可选，用于RAG/Agent模式)")
+    session_id: Optional[str] = Field("default", description="会话ID(Agent模式记忆)")
+    enable_web: Optional[bool] = Field(False, description="是否启用联网搜索 (Q8)")
 
 
 class ChatResponseChoice(BaseModel):
@@ -45,28 +45,5 @@ class ChatResponse(BaseModel):
     model: str
     choices: List[ChatResponseChoice]
     usage: Optional[ChatUsage] = None
-
-    model_config = {"from_attributes": True}
-
-
-class ChatSession(BaseModel):
-    """会话信息"""
-    session_id: str
-    title: str
-    message_count: int
-    last_message_at: str
-
-    model_config = {"from_attributes": True}
-
-
-class ChatHistoryResponse(BaseModel):
-    """v2.4: 聊天历史响应 — 对应 ChatHistory ORM 模型"""
-    id: str
-    kb_id: str
-    session_id: str
-    role: str
-    content: str
-    sources: dict = {}
-    created_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}

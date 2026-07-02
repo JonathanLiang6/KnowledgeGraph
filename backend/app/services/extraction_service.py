@@ -79,6 +79,24 @@ class ExtractionService:
             "legend": legend,
         }
 
+    @classmethod
+    def to_graph_format(cls, result: dict, doc_id: str, kb_id: str) -> dict:
+        """
+        Phase 1: 将提取结果转换为 GraphService.build_graph() 可消费的格式。
+        为每个实体/关系附加来源文档信息。
+        """
+        nodes = result.get("nodes", [])
+        links = result.get("links", [])
+
+        for node in nodes:
+            node["_doc_id"] = doc_id
+            node["_kb_id"] = kb_id
+        for link in links:
+            link["_doc_id"] = doc_id
+            link["_kb_id"] = kb_id
+
+        return {"nodes": nodes, "links": links, "legend": result.get("legend", {})}
+
     @staticmethod
     def _denoise(entities: List[dict], relationships: List[dict]) -> tuple:
         """

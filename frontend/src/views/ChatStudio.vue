@@ -80,11 +80,27 @@
       <!-- 底部操作栏 -->
       <div class="chat-footer">
         <div class="mode-bar">
-          <el-radio-group v-model="searchMode" size="small">
-            <el-radio-button value="rag-hybrid">混合检索</el-radio-button>
-            <el-radio-button value="rag-local">向量检索</el-radio-button>
-            <el-radio-button value="deepseek-chat">直接问答</el-radio-button>
-          </el-radio-group>
+          <div class="mode-left">
+            <el-switch
+              v-model="useAgent"
+              size="small"
+              active-text="Agent推理"
+              inactive-text="知识库问答"
+              style="--el-switch-on-color: #0D9488; --el-switch-off-color: #2D8C4E"
+            />
+          </div>
+          <div class="mode-right">
+            <el-tooltip content="启用后，Agent 在本地知识库信息不足时可联网搜索" placement="top">
+              <el-switch
+                v-model="enableWeb"
+                size="small"
+                active-text="🕸️ 联网"
+                inactive-text="📚 仅本地"
+                :disabled="!useAgent"
+                style="--el-switch-on-color: #E6A23C; --el-switch-off-color: #909399"
+              />
+            </el-tooltip>
+          </div>
         </div>
         <div class="input-row">
           <div class="input-wrapper">
@@ -127,6 +143,7 @@ import { useRoute } from 'vue-router'
 import { chatCompletionsStream } from '../api/chat'
 import { Cpu, User, Plus, Promotion, Close, WarningFilled } from '@element-plus/icons-vue'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
@@ -136,7 +153,8 @@ const messagesContainer = ref(null)
 const messages = ref([])
 const inputText = ref('')
 const isStreaming = ref(false)
-const searchMode = ref('rag-hybrid')
+const useAgent = ref(false)       // v3.2: Agent vs 知识库问答 切换
+const enableWeb = ref(true)       // v3.2: 联网搜索开关（仅在 Agent 模式下有效）
 
 let streamController = null
 let msgIdCounter = 0
@@ -161,12 +179,20 @@ function scrollToBottom() {
 
 function renderMarkdown(text) {
   if (!text) return ''
-  const safe = text
+  const raw = marked.parse(text)
+  if (typeof DOMPurify !== 'undefined') {
+    return DOMPurify.sanitize(raw, {
+      ALLOWED_TAGS: ['a', 'code', 'pre', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
+        'ul', 'ol', 'li', 'strong', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'blockquote', 'p', 'br', 'hr', 'img', 'del', 'sup', 'sub', 'span', 'div'],
+      ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'target', 'rel'],
+    })
+  }
+  return raw
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
     .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
     .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
     .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
-  return marked.parse(safe)
 }
 
 function escapeHtml(text) {
@@ -178,16 +204,35 @@ function escapeHtml(text) {
     .replace(/\n/g, '<br>')
 }
 
+// v3.2: 流式 Markdown 渲染节流 — 避免逐字符调用 marked.parse()
+let streamingMdCache = ''
+let streamingMdRendered = ''
+let mdRenderPending = false
+
 function renderMessageContent(msg, idx) {
-  // 流式输出中或打字机队列仍在消耗：纯文本 + 闪烁光标
+  // 流式输出中或打字机队列仍在消耗 → 实时 Markdown 渲染 + 闪烁光标
   if (
     (isStreaming.value || typewriterRunning.value) &&
     idx === messages.value.length - 1 &&
     msg.role === 'assistant'
   ) {
     const display = msg.content || ''
-    return escapeHtml(display) +
-      '<span class="typewriter-cursor">|</span>'
+    // 节流：内容未变则复用缓存
+    if (display === streamingMdCache) {
+      return streamingMdRendered + '<span class="typewriter-cursor">|</span>'
+    }
+    streamingMdCache = display
+    // 用 requestAnimationFrame 节流，避免高频 DOM 更新卡顿
+    if (!mdRenderPending) {
+      mdRenderPending = true
+      requestAnimationFrame(() => {
+        mdRenderPending = false
+        streamingMdRendered = renderMarkdown(streamingMdCache)
+        // 手动触发响应式更新
+        messages.value = [...messages.value]
+      })
+    }
+    return streamingMdRendered + '<span class="typewriter-cursor">|</span>'
   }
   return renderMarkdown(msg.content)
 }
@@ -268,6 +313,8 @@ function processTypewriterQueue(msg) {
 function cleanupTypewriter() {
   typewriterQueue.length = 0
   typewriterRunning.value = false
+  streamingMdCache = ''
+  streamingMdRendered = ''
   if (typewriterTimeoutId !== null) {
     clearTimeout(typewriterTimeoutId)
     typewriterTimeoutId = null
@@ -340,9 +387,10 @@ async function sendMessage() {
 
   streamController = chatCompletionsStream(
     {
-      model: searchMode.value,
+      model: useAgent.value ? 'rag-agent' : 'rag-hybrid',
       messages: chatMessages,
       kb_id: route.params.id || null,
+      enable_web: enableWeb.value,
     },
     // onChunk — 逐字符入队，打字机队列自动驱动显示
     (char, charType) => {
@@ -352,6 +400,8 @@ async function sendMessage() {
     () => {
       isStreaming.value = false
       streamController = null
+      streamingMdCache = ''
+      streamingMdRendered = ''
       // 如果队列已空且打字机未运行，手动最终化
       if (typewriterQueue.length === 0 && !typewriterRunning.value) {
         if (!assistantMsg.content) {
@@ -702,8 +752,15 @@ onBeforeUnmount(() => {
 }
 
 .mode-bar {
-  text-align: center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: var(--spacing-sm);
+
+  .mode-left, .mode-right {
+    display: flex;
+    align-items: center;
+  }
 }
 
 .input-row {

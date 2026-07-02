@@ -1,6 +1,7 @@
 """
 混合检索服务 - LanceDB 向量检索 + BM25 稀疏检索 + RRF 融合
 P2 优化：BM25 增量更新、LanceDB 持久化、分词修复
+v3.1: 统一 RRF 融合算法（标准 Reciprocal Rank Fusion, k=60）
 """
 import os
 import logging
@@ -414,67 +415,55 @@ class HybridSearchService:
             融合后的检索结果列表，按分数降序
         """
         # 1. 向量检索
-        vector_results = self.vector_store.search(query_vector, top_k=top_k * 2)
-        vector_scores: Dict[str, float] = {}
-        vector_data: Dict[str, dict] = {}
-        for r in vector_results:
+        vector_results_raw = self.vector_store.search(query_vector, top_k=top_k * 2)
+        vector_results: List[SearchResult] = []
+        vector_ids: set = set()
+        for r in vector_results_raw:
             vid = r["id"]
-            # LanceDB 返回 _distance，转为相似度分数
             distance = r.get("_distance", 0.0)
-            similarity = 1.0 / (1.0 + distance)  # 距离 → 相似度
-            vector_scores[vid] = similarity
-            vector_data[vid] = r
+            similarity = 1.0 / (1.0 + distance)
+            vector_results.append(SearchResult(
+                chunk_id=vid,
+                text=r.get("text", ""),
+                score=similarity,
+                parent_text=None,
+                source="vector",
+            ))
+            vector_ids.add(vid)
 
         # 2. BM25 检索
-        bm25_results = self.bm25_index.search(query, top_k=top_k * 2)
-        bm25_scores: Dict[str, float] = {}
-        for doc_id, score in bm25_results:
-            bm25_scores[doc_id] = score
+        bm25_raw = self.bm25_index.search(query, top_k=top_k * 2)
+        bm25_results: List[SearchResult] = []
+        for doc_id, score in bm25_raw:
+            if doc_id not in vector_ids:
+                data = self._all_chunks_cache.get(doc_id, {})
+                bm25_results.append(SearchResult(
+                    chunk_id=doc_id,
+                    text=data.get("text", ""),
+                    score=score,
+                    parent_text=None,
+                    source="bm25",
+                ))
 
-        # 3. RRF 融合
-        all_ids = set(list(vector_scores.keys()) + list(bm25_scores.keys()))
-
-        fused = []
-        for chunk_id in all_ids:
-            v_score = vector_scores.get(chunk_id, 0.0)
-            b_score = bm25_scores.get(chunk_id, 0.0)
-            fused_score = self.vector_weight * v_score + self.bm25_weight * b_score
-            fused.append((chunk_id, fused_score))
-
-        # 排序
-        fused.sort(key=lambda x: x[1], reverse=True)
+        # 3. RRF 融合 (标准 Reciprocal Rank Fusion)
+        fused = rrf_fusion([vector_results, bm25_results], k=60)
         fused = fused[:top_k]
 
-        # 4. 构建 SearchResult（修复 parent_text 查找）
+        # 4. 补充 parent_text
         results = []
-        for chunk_id, score in fused:
-            # 优先从向量结果获取数据
-            data = vector_data.get(chunk_id)
-            if data is None:
-                # BM25 only 的结果：从缓存获取
-                data = self._all_chunks_cache.get(chunk_id, {})
-
-            text = data.get("text", "")
+        for r in fused:
             parent_text = None
+            data = self._all_chunks_cache.get(r.chunk_id, {})
             parent_id = data.get("parent_id", "")
-
             if parent_id:
-                # 查找父块文本：先查向量数据，再查缓存
-                parent_data = vector_data.get(parent_id) or self._all_chunks_cache.get(parent_id, {})
-                parent_text = parent_data.get("text", "")
-
-            source = "fusion"
-            if chunk_id in vector_scores and chunk_id not in bm25_scores:
-                source = "vector"
-            elif chunk_id in bm25_scores and chunk_id not in vector_scores:
-                source = "bm25"
-
+                parent_data = self._all_chunks_cache.get(parent_id, {})
+                parent_text = parent_data.get("text")
             results.append(SearchResult(
-                chunk_id=chunk_id,
-                text=text,
-                score=score,
+                chunk_id=r.chunk_id,
+                text=data.get("text", r.text),
+                score=r.score,
                 parent_text=parent_text,
-                source=source,
+                source=r.source,
             ))
 
         return results
@@ -503,3 +492,48 @@ class HybridSearchService:
 # ─── 模块级单例 ─────────────────────────────────────────────────
 # 所有检索和索引操作共享同一实例，确保 BM25 和向量数据一致
 hybrid_search_service = HybridSearchService()
+
+
+# ─── 标准 RRF 融合函数 ─────────────────────────────────────────
+# 统一使用标准 Reciprocal Rank Fusion (k=60)
+# 所有检索融合（向量+BM25、混合+图检索）都调用此函数
+
+def rrf_fusion(
+    result_sets: List[List[SearchResult]],
+    k: int = 60,
+) -> List[SearchResult]:
+    """
+    Reciprocal Rank Fusion — 融合多路检索结果。
+
+    为每个 chunk 计算 RRF 分数:
+        score = Σ 1/(k + rank_i)
+    其中 rank_i 是该 chunk 在第 i 路结果中的排名（从 1 开始）。
+
+    Args:
+        result_sets: 多路检索结果列表，每路是 SearchResult 列表
+        k: RRF 平滑常数，默认 60
+
+    Returns:
+        融合后的检索结果列表，按 RRF 分数降序排列
+    """
+    chunk_scores: Dict[str, float] = {}
+    chunk_data: Dict[str, SearchResult] = {}
+
+    for results in result_sets:
+        for rank, r in enumerate(results, start=1):
+            cid = r.chunk_id
+            rrf_score = 1.0 / (k + rank)
+            chunk_scores[cid] = chunk_scores.get(cid, 0.0) + rrf_score
+            if cid not in chunk_data:
+                chunk_data[cid] = r
+
+    # 按 RRF 分数排序
+    sorted_ids = sorted(chunk_scores, key=chunk_scores.get, reverse=True)
+
+    merged = []
+    for cid in sorted_ids:
+        data = chunk_data[cid]
+        data.score = round(chunk_scores[cid], 4)
+        merged.append(data)
+
+    return merged

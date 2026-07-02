@@ -1,9 +1,12 @@
 """
-测试配置与共享 fixtures
+测试配置与共享 fixtures — v3.1
 """
 import pytest
 import asyncio
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+
+TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
 
 @pytest.fixture(scope="session")
@@ -21,3 +24,20 @@ async def async_client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+
+@pytest.fixture
+async def db_session():
+    """创建隔离的数据库会话（SQLite 内存）"""
+    engine = create_async_engine(TEST_DB_URL, echo=False)
+    async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    # 创建表
+    from app.core.database import Base
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session() as session:
+        yield session
+
+    await engine.dispose()

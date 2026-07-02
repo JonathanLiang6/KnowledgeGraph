@@ -52,6 +52,14 @@ class Base(DeclarativeBase):
     pass
 
 
+# 确保所有模型在 create_all 前被导入（字符串关系依赖）
+import app.models.knowledge_base  # noqa: E402
+import app.models.document  # noqa: E402
+import app.models.system_setting  # noqa: E402
+import app.models.graph_entity  # noqa: E402  # Phase 1: GraphRAG
+import app.models.topology  # noqa: E402  # v3.2: Q10 拓扑导航
+
+
 async def get_db() -> AsyncSession:
     """
     FastAPI 依赖注入: 获取数据库 session。
@@ -96,6 +104,19 @@ async def init_db():
             except Exception:
                 # 列已存在，忽略
                 pass
+
+        # Phase 1: 迁移 — 为 graph_entities/graph_relations 添加 kb_id 列
+        if _is_sqlite:
+            for table_name in ["graph_entities", "graph_relations"]:
+                try:
+                    await conn.run_sync(
+                        lambda sync_conn, tn=table_name: sync_conn.exec_driver_sql(
+                            f"ALTER TABLE {tn} ADD COLUMN kb_id VARCHAR(36)"
+                        )
+                    )
+                    logger.info(f"数据库迁移: 已添加 {table_name}.kb_id 列")
+                except Exception:
+                    pass  # 列已存在
 
 
 async def close_db():

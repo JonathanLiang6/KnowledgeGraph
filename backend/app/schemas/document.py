@@ -37,24 +37,6 @@ class DocumentResponse(BaseModel):
         return str(v) if v is not None else "unknown"
 
 
-class DocumentBriefResponse(BaseModel):
-    """文档简要响应（列表用）"""
-    id: str
-    kb_id: str
-    filename: str
-    file_type: str
-    file_size: int
-    status: str
-    progress: float
-    entity_count: int
-    relationship_count: int
-    error_message: str = ""
-    created_at: datetime
-    processed_at: Optional[datetime] = None
-
-    model_config = {"from_attributes": True}
-
-
 class DocumentListResponse(BaseModel):
     """文档列表响应"""
     items: List[DocumentResponse]
@@ -126,8 +108,3 @@ class DocumentStats(BaseModel):
     failed: int = 0
 
 
-class FileValidationError(BaseModel):
-    """文件校验错误"""
-    filename: str
-    error: str
-    error_type: str  # "size_exceeded", "type_not_allowed", "mime_not_allowed", "duplicate"

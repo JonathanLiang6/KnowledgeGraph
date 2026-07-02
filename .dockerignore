@@ -1,0 +1,66 @@
+# ============================================================
+# KnowledgeGraph v3.1 .dockerignore
+# 排除本地开发数据和依赖，减小 Docker 构建上下文
+# ============================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# 运行时数据（通过 volume 挂载，不打包进镜像）
+backend/data/
+backend/inputs/files/*
+!backend/inputs/files/.gitkeep
+
+# 数据库文件
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# 模型权重（通过 volume 挂载或运行时下载）
+backend/data/models/
+
+# 环境配置（含密钥）
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 前端
+frontend/node_modules/
+frontend/dist/
+
+# Git
+.git/
+.gitattributes
+
+# 测试和覆盖率
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ruff_cache/
+coverage/
+htmlcov/
+
+# 日志
+*.log
+backend/logs/
+
+# OS
+.DS_Store
+Thumbs.db

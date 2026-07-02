@@ -45,6 +45,12 @@
         </router-link>
         <!-- 滑动指示器 -->
         <div class="nav-indicator" ref="navIndicator" />
+        <!-- v3.2: 知识体检按钮 -->
+        <div class="nav-extra">
+          <el-button size="small" text @click="openCoverageDialog">
+            📊 知识体检
+          </el-button>
+        </div>
       </div>
     </nav>
 
@@ -58,6 +64,33 @@
         </router-view>
       </template>
     </main>
+
+    <!-- v3.2: 知识体检弹窗 -->
+    <el-dialog
+      v-model="showCoverage"
+      title="📊 知识覆盖体检"
+      width="700px"
+      destroy-on-close
+    >
+      <div v-if="coverageLoading" style="text-align:center;padding:40px">
+        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
+        <p style="margin-top:12px;color:var(--text-secondary)">分析中...</p>
+      </div>
+      <div v-else-if="coverageError" style="text-align:center;padding:40px;color:var(--color-danger)">
+        {{ coverageError }}
+      </div>
+      <div v-else-if="coverageData">
+        <div class="coverage-summary">
+          <span>{{ coverageData.total_entities }} 个实体</span>
+          <span>·</span>
+          <span>{{ coverageData.category_count }} 个分类</span>
+        </div>
+        <div ref="chartRef" style="width:100%;height:380px;margin-top:16px" />
+      </div>
+      <div v-else style="text-align:center;padding:40px;color:var(--text-tertiary)">
+        暂无数据
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -65,7 +98,9 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { getKnowledgeBase } from '../api/knowledgeBase'
-import { ArrowLeft, Collection, Document, Share, ChatDotRound } from '@element-plus/icons-vue'
+import { ArrowLeft, Collection, Document, Share, ChatDotRound, Loading } from '@element-plus/icons-vue'
+import api from '../api'
+import * as echarts from 'echarts'
 
 const route = useRoute()
 const kbId = computed(() => route.params.id)
@@ -73,6 +108,13 @@ const kb = ref(null)
 const loading = ref(true)
 const error = ref(false)
 const navIndicator = ref(null)
+
+// v3.2: 知识体检
+const showCoverage = ref(false)
+const coverageLoading = ref(false)
+const coverageError = ref('')
+const coverageData = ref(null)
+const chartRef = ref(null)
 
 async function fetchKB() {
   loading.value = true
@@ -86,6 +128,75 @@ async function fetchKB() {
   } finally {
     loading.value = false
   }
+}
+
+async function openCoverageDialog() {
+  showCoverage.value = true
+  coverageLoading.value = true
+  coverageError.value = ''
+  coverageData.value = null
+  try {
+    const data = await api.get(`/analytics/kb/${kbId.value}/coverage`)
+    coverageData.value = data
+    await nextTick()
+    renderTreemap()
+  } catch (e) {
+    coverageError.value = e.message || '获取覆盖数据失败'
+  } finally {
+    coverageLoading.value = false
+  }
+}
+
+function renderTreemap() {
+  if (!chartRef.value || !coverageData.value) return
+  const chart = echarts.init(chartRef.value)
+
+  const categories = coverageData.value.categories || []
+  // 按实体数降序
+  categories.sort((a, b) => b.count - a.count)
+
+  const maxDays = Math.max(...categories.map(c => c.last_updated_days), 1)
+
+  chart.setOption({
+    tooltip: {
+      formatter: (params) => {
+        const d = params.data
+        return `<b>${d.name}</b><br/>实体数: ${d.value}<br/>最后更新: ${d.last_updated_days} 天前`
+      },
+    },
+    series: [{
+      type: 'treemap',
+      data: categories.map(c => ({
+        name: c.name,
+        value: c.count,
+        last_updated_days: c.last_updated_days,
+        itemStyle: {
+          // 颜色深浅：红色=老旧(>30天)，绿色=新鲜(<7天)，黄色=普通
+          color: c.last_updated_days > 30
+            ? `rgba(220,80,80,${0.5 + (1 - c.last_updated_days / maxDays) * 0.5})`
+            : c.last_updated_days > 7
+              ? `rgba(230,162,60,${0.5 + (1 - c.last_updated_days / maxDays) * 0.5})`
+              : `rgba(45,140,78,${0.4 + (1 - c.last_updated_days / maxDays) * 0.6})`,
+        },
+      })),
+      label: {
+        show: true,
+        formatter: (params) => `${params.name}\n${params.value}`,
+        fontSize: 12,
+      },
+      upperLabel: {
+        show: true,
+        height: 20,
+      },
+      roam: false,
+      width: '100%',
+      height: '100%',
+    }],
+  })
+
+  // 响应式调整
+  const observer = new ResizeObserver(() => chart.resize())
+  observer.observe(chartRef.value)
 }
 
 // 滑动指示器位置更新
@@ -102,17 +213,14 @@ function updateNavIndicator() {
 
 onMounted(() => {
   fetchKB()
-  // 初始和窗口变化时更新指示器
   updateNavIndicator()
   window.addEventListener('resize', updateNavIndicator)
 })
 
-// 路由参数变化时重新加载（切换知识库）
 watch(() => route.params.id, (newId) => {
   if (newId) fetchKB()
 })
 
-// 路由路径变化时更新导航指示器
 watch(() => route.path, () => {
   updateNavIndicator()
 })
@@ -266,8 +374,29 @@ watch(() => route.path, () => {
   z-index: 0;
 }
 
+// v3.2: 右侧操作区
+.nav-extra {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  padding-right: 8px;
+}
+
 .kb-main {
   flex: 1;
   padding: var(--spacing-lg) 24px;
+}
+
+// v3.2: 知识体检
+.coverage-summary {
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-secondary);
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 0;
+  background: var(--bg-page);
+  border-radius: var(--radius-sm);
 }
 </style>

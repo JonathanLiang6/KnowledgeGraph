@@ -355,12 +355,6 @@ class EmbeddingService:
         return results[0] if results else []
 
     @classmethod
-    async def encode_single_async(cls, text: str) -> List[float]:
-        """异步单文本编码"""
-        results = await cls.encode_async([text])
-        return results[0] if results else []
-
-    @classmethod
     def get_dimension(cls) -> int:
         """获取向量维度"""
         model_data = _load_model()

@@ -1,12 +1,12 @@
 """
-智能问答 API - 多模式问答 + SSE 流式输出
+智能问答 API - 多模式问答 + SSE 流式输出 + Agentic RAG (Phase 2)
 """
 import json
 import time
 import uuid
 import logging
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from typing import List, AsyncGenerator
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -27,11 +27,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["智能问答"])
 
 
-# 可用的搜索模式
+# 可用的搜索模式 (v3.2: 简化为两种核心模式 + Agent)
 SEARCH_MODES = {
-    "deepseek-chat": "DeepSeek V4 直接问答",
-    "rag-local": "RAG 本地知识库检索",
-    "rag-hybrid": "RAG 混合检索（向量+BM25+重排序）",
+    "rag-hybrid": "RAG 混合检索（向量+BM25+重排序）— 知识库问答推荐模式",
+    "rag-agent": "Agentic RAG — 多步推理 + 工具调用（图谱遍历+混合检索）",
 }
 
 
@@ -47,6 +46,17 @@ async def list_models():
     }
 
 
+@router.get("/agent/clear")
+async def clear_agent_memory(
+    kb_id: str = Query("__global__", description="知识库ID（v3.2: kb_id 隔离）"),
+    session_id: str = Query("default", description="会话ID"),
+):
+    """清除 Agent 会话记忆（v3.2: kb_id 隔离）"""
+    from app.services.agent_service import ReActAgent
+    ReActAgent.clear_session(kb_id, session_id)
+    return {"status": "ok", "message": f"会话 {session_id} (kb={kb_id}) 的记忆已清除"}
+
+
 @router.post("/completions")
 async def chat_completions(
     request: ChatRequest,
@@ -55,20 +65,59 @@ async def chat_completions(
     """
     问答接口（OpenAI 兼容格式）。
     支持流式 (stream=True) 和非流式两种模式。
+    Phase 2: + rag-agent 模式
     """
     if not config.is_api_key_set:
         raise HTTPException(status_code=503, detail="DeepSeek API 未配置")
 
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
-    # 根据 model 决定搜索模式
-    if request.model in ("rag-local", "rag-hybrid") and request.kb_id:
-        # RAG 模式：先检索再回答
+    # v3.2: Agent 模式（支持联网搜索开关）
+    if request.model == "rag-agent" and request.kb_id:
+        enable_web = getattr(request, 'enable_web', False)
+        if request.stream:
+            return StreamingResponse(
+                _stream_agent_response(chat_id, request),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+        else:
+            # 非流式 Agent
+            from app.services.agent_service import ReActAgent
+            agent = ReActAgent(
+                db, request.kb_id,
+                getattr(request, 'session_id', 'default'),
+                enable_web=enable_web,
+            )
+            user_query = _get_user_query(request.messages)
+            full_answer = ""
+            async for event in agent.run(user_query):
+                if event["type"] == "agent/answer":
+                    full_answer = event["content"]
+            return ChatResponse(
+                id=chat_id,
+                created=int(time.time()),
+                model=request.model,
+                choices=[
+                    ChatResponseChoice(
+                        index=0,
+                        message=Message(role="assistant", content=full_answer),
+                        finish_reason="stop",
+                    )
+                ],
+                usage=ChatUsage(),
+            )
+
+    # v3.2: 简化模式 — rag-hybrid 检索知识库，否则直接对话
+    if request.model == "rag-hybrid" and request.kb_id:
         messages = await _build_rag_messages(
             request.messages, request.kb_id, request.model, db
         )
     else:
-        # 直接问答模式
         messages = [m.model_dump() for m in request.messages]
 
     if request.stream:
@@ -83,7 +132,6 @@ async def chat_completions(
             },
         )
     else:
-        # 非流式
         result = await DeepSeekClient.chat(
             messages=messages,
             temperature=request.temperature,
@@ -134,6 +182,95 @@ async def _stream_response(chat_id: str, model: str, messages: List[dict],
         yield "data: [DONE]\n\n"
 
 
+def _get_user_query(messages: List[Message]) -> str:
+    """从消息列表中提取最后的用户消息"""
+    for msg in reversed(messages):
+        if msg.role == "user":
+            return msg.content
+    return ""
+
+
+async def _stream_agent_response(
+    chat_id: str,
+    request: ChatRequest,
+) -> AsyncGenerator[str, None]:
+    """
+    SSE 流式 Agent 响应生成器 (Phase 2)。
+
+    发送 Agent 推理事件:
+    - agent/thought: Agent 的思考过程
+    - agent/action: 工具调用
+    - agent/observation: 工具返回结果
+    - agent/answer: 最终答案
+    - agent/error: 错误信息
+    """
+    from app.services.agent_service import ReActAgent
+    from app.core.database import async_session_factory
+
+    user_query = _get_user_query(request.messages)
+    session_id = getattr(request, 'session_id', 'default')
+    enable_web = getattr(request, 'enable_web', False)
+
+    try:
+        async with async_session_factory() as db:
+            agent = ReActAgent(db, request.kb_id, session_id, enable_web=enable_web)
+
+            async for event in agent.run(user_query):
+                event_type = event.get("type", "")
+
+                if event_type == "agent/answer":
+                    # 最终答案 — 使用打字机效果逐字符推送
+                    answer = event.get("content", "")
+                    async for char_item in char_stream(_char_by_char(answer)):
+                        chunk = {
+                            "id": chat_id,
+                            "object": "agent.chunk",
+                            "created": int(time.time()),
+                            "model": request.model,
+                            "choices": [{
+                                "index": 0,
+                                "delta": {
+                                    "content": char_item["char"],
+                                    "char_type": char_item["type"],
+                                },
+                                "finish_reason": None,
+                            }],
+                        }
+                        yield f"data: {json.dumps(chunk)}\n\n"
+                elif event_type in ("agent/thought", "agent/action", "agent/observation", "agent/error"):
+                    # Agent 推理事件 — 作为特殊事件推送
+                    agent_event = {
+                        "id": chat_id,
+                        "object": "agent.event",
+                        "created": int(time.time()),
+                        "model": request.model,
+                        "event": event,
+                    }
+                    yield f"data: {json.dumps(agent_event)}\n\n"
+
+        # 发送结束帧
+        done_chunk = {
+            "id": chat_id,
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": request.model,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        }
+        yield f"data: {json.dumps(done_chunk)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    except Exception as e:
+        logger.error(f"Agent SSE 响应错误: {e}")
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+
+async def _char_by_char(text: str):
+    """将文本逐字符 yield（模拟流式输出）"""
+    for char in text:
+        yield char
+
+
 async def _build_rag_messages(
     messages: List[Message],
     kb_id: str,
@@ -165,6 +302,8 @@ async def _build_rag_messages(
         use_rerank = (model == "rag-hybrid")
         search_results = await RAGService.search_async(
             query=user_query,
+            kb_id=kb_id,
+            db=db,
             top_k=config.HYBRID_SEARCH_TOP_K,
             use_rerank=use_rerank,
         )

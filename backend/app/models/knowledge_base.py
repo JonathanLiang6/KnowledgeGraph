@@ -27,8 +27,6 @@ class KnowledgeBase(Base):
 
     # 关联文档
     documents = relationship("Document", back_populates="knowledge_base", cascade="all, delete-orphan")
-    # 关联聊天历史
-    chat_histories = relationship("ChatHistory", back_populates="knowledge_base", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<KnowledgeBase(id={self.id}, name={self.name})>"

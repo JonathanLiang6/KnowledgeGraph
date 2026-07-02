@@ -1,13 +1,27 @@
 [project]
 name = "knowledge-graph"
-version = "3.0.0"
-description = "知识图谱智能问答系统 — 森林绿主题 · D3.js 图谱可视化 · SSE 流式问答"
+version = "4.0.0"
+description = "个人知识库管理平台 — 拓扑导航 · Agent联网推理 · 多模态感知 · 知识覆盖诊断"
 requires-python = ">=3.11"
 readme = "README.md"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.24",
+    "pytest-httpx>=0.30",
+]
 
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "C4", "T10", "ARG"]
+ignore = ["T10"]  # T10: explicit stacklevel on warn — too noisy for a project this size
+
+[tool.ruff.format]
+quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
@@ -16,3 +30,5 @@ asyncio_mode = "auto"
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
+disallow_untyped_defs = true
+warn_unused_ignores = true

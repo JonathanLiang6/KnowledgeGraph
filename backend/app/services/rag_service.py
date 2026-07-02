@@ -1,16 +1,18 @@
 """
 RAG 编排服务 - 串联 chunk → embed → hybrid search → rerank → build context
-v2.2: GraphRAG 增强检索 / 查询改写 / LRU 缓存 / 检索指标日志
-v2.3: 图谱索引线程安全 + 缓存 key 包含图谱状态
+v3.1 (Phase 1): GraphRAG 升级 — 使用 GraphRetriever 替代内存索引 + 全局搜索 + 查询路由
 """
-import time
 import asyncio
+import time
 import logging
-from typing import List, Optional, Dict
-from collections import OrderedDict
-from app.services.chunking_service import SemanticChunker, Chunk
+from typing import List, Optional
+from cachetools import TTLCache
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.chunking_service import SemanticChunker
 from app.services.embedding_service import EmbeddingService
-from app.services.hybrid_search import HybridSearchService, SearchResult, hybrid_search_service
+from app.services.hybrid_search import SearchResult, hybrid_search_service, rrf_fusion
 from app.services.reranker_service import RerankerService
 from app.core.config import config
 
@@ -23,114 +25,51 @@ _chunker = SemanticChunker(
     chunk_overlap=config.CHUNK_OVERLAP,
     strategy="parent_child",
 )
-_hybrid_search = hybrid_search_service  # v2.5: 使用模块级单例
+_hybrid_search = hybrid_search_service
 
-# ── 图谱实体索引 (内存) + 线程安全 ──────────────────────────
-# 结构: {"实体名": {"type": "...", "related": ["关联实体1", ...], "id": "..."}}
-_graph_entity_index: Dict[str, dict] = {}
-_graph_index_lock: Optional[asyncio.Lock] = None  # 延迟创建 (v2.4: 避免绑定错误事件循环)
-_graph_version: int = 0
+# ── 查询类型分类 ─────────────────────────────────────────────
 
-
-def _get_lock() -> asyncio.Lock:
-    """延迟获取锁 (v2.4: 确保绑定到正确的 event loop)"""
-    global _graph_index_lock
-    if _graph_index_lock is None:
-        _graph_index_lock = asyncio.Lock()
-    return _graph_index_lock
-
-
-def update_graph_index(nodes: List[dict], links: List[dict]):
-    """更新图谱实体索引，供 GraphRAG 检索使用（非异步，由调用方保证线程安全）"""
-    global _graph_version
-    if not nodes:
-        return
-    _graph_entity_index.clear()
-    name_to_info = {}
-    for nd in nodes:
-        name_to_info[nd.get("name", "")] = {
-            "id": nd.get("id", ""),
-            "type": nd.get("type", ""),
-            "weight": nd.get("weight", 0.5),
-            "related": [],
-        }
-
-    # 填充关联实体 (v2.3: 先构建 ID→name 映射, O(n+m) 替代 O(n*m))
-    id_to_name = {nd.get("id", ""): nd.get("name", "") for nd in nodes}
-    for link in links:
-        src = link.get("source", "")
-        tgt = link.get("target", "")
-        src_name = id_to_name.get(src, "")
-        tgt_name = id_to_name.get(tgt, "")
-        if src_name in name_to_info:
-            name_to_info[src_name]["related"].append(tgt_name)
-        if tgt_name in name_to_info:
-            name_to_info[tgt_name]["related"].append(src_name)
-
-    for name, info in name_to_info.items():
-        _graph_entity_index[name] = info
-    _graph_version += 1
-    logger.debug(f"[GraphRAG] 图谱索引更新: {len(_graph_entity_index)} 实体 (v{_graph_version})")
+# 总结类关键词 → global search
+_SUMMARY_KEYWORDS = [
+    "总结", "概述", "归纳", "全局", "整体", "概览", "有哪些", "所有", "全部",
+    "summarize", "overview", "summary", "all",
+]
+# 事实类关键词 → local search
+_FACTUAL_KEYWORDS = [
+    "什么是", "如何", "怎样", "为什么", "定义", "解释", "区别", "比较", "对比",
+    "异同", "优缺点", "特点", "特征", "关系",
+    "what", "how", "why", "define", "explain", "compare", "difference",
+]
+# 否定前缀 — 以此开头的短句不应触发摘要路由
+_NEGATION_PREFIXES = ["不要", "别", "禁止", "不能", "不应该", "不需要"]
 
 
-async def _extract_query_entities_async(query: str) -> List[str]:
-    """从查询中快速匹配图谱实体（基于子串匹配, 带锁）"""
-    lock = _get_lock()
-    async with lock:
-        matched = []
-        for name in _graph_entity_index:
-            if len(name) >= 2 and name in query:
-                matched.append(name)
-        # 按权重排序，取 top
-        matched.sort(key=lambda n: _graph_entity_index[n].get("weight", 0), reverse=True)
-        return matched
+def classify_query_type(query: str) -> str:
+    """
+    将查询分类为 'factual'（局部检索）或 'summary'（全局检索）。
+
+    - summary: 总结、概述、全局性问题 → global_search (社区摘要)
+    - factual: 具体事实、定义、关系查询 → local_search (混合检索+图检索)
+    """
+    q_stripped = query.strip()
+    q_lower = q_stripped.lower()
+    # 否定检测：如果以否定前缀开头，不作为摘要类
+    has_negation = any(q_stripped.startswith(p) for p in _NEGATION_PREFIXES)
+    if not has_negation:
+        for kw in _SUMMARY_KEYWORDS:
+            if kw in q_lower:
+                return "summary"
+    for kw in _FACTUAL_KEYWORDS:
+        if kw in q_lower:
+            return "factual"
+    # 默认: 短查询 → factual, 长查询 → summary
+    return "factual" if len(q_stripped) < 50 else "summary"
 
 
-def _extract_query_entities(query: str) -> List[str]:
-    """同步版本（内部使用，调用方需确保线程安全）"""
-    matched = []
-    for name in _graph_entity_index:
-        if len(name) >= 2 and name in query:
-            matched.append(name)
-    matched.sort(key=lambda n: _graph_entity_index[n].get("weight", 0), reverse=True)
-    return matched
+# ── LRU 检索缓存（使用 cachetools.TTLCache）────────────────
 
-
-# ── LRU 检索缓存 ────────────────────────────────────────────
-
-class _SearchCache:
-    """线程安全的 LRU 检索缓存"""
-
-    def __init__(self, max_size: int = 128, ttl: int = 60):
-        self._cache = OrderedDict()
-        self._max_size = max_size
-        self._ttl = ttl
-
-    def get(self, key: str) -> Optional[List[SearchResult]]:
-        if key not in self._cache:
-            return None
-        entry = self._cache[key]
-        if time.monotonic() - entry["ts"] > self._ttl:
-            del self._cache[key]
-            return None
-        self._cache.move_to_end(key)
-        return entry["results"]
-
-    def set(self, key: str, results: List[SearchResult]):
-        if key in self._cache:
-            self._cache.move_to_end(key)
-            self._cache[key] = {"results": results, "ts": time.monotonic()}
-        else:
-            self._cache[key] = {"results": results, "ts": time.monotonic()}
-            if len(self._cache) > self._max_size:
-                self._cache.popitem(last=False)
-
-    def clear(self):
-        self._cache.clear()
-
-
-_search_cache = _SearchCache(
-    max_size=config.SEARCH_CACHE_SIZE,
+_search_cache: TTLCache = TTLCache(
+    maxsize=config.SEARCH_CACHE_SIZE,
     ttl=config.SEARCH_CACHE_TTL,
 )
 
@@ -140,8 +79,9 @@ _search_cache = _SearchCache(
 class RAGService:
     """
     RAG 检索增强生成编排服务。
+
     完整流程：文档 → 分块 → 嵌入 → 混合索引 → 查询检索 → 重排序 → 构建上下文
-    v2.2: + GraphRAG 增强 + 查询改写 + 缓存 + 指标
+    Phase 1: GraphRAG 使用 GraphRetriever 进行多跳图检索 + 全局社区搜索
     """
 
     @classmethod
@@ -165,45 +105,46 @@ class RAGService:
         }
 
     @classmethod
-    def search(
-        cls,
-        query: str,
-        top_k: int = None,
-        use_rerank: bool = True,
-    ) -> List[SearchResult]:
-        """同步查询检索"""
-        return _do_search(query, top_k, use_rerank)
-
-    @classmethod
     async def search_async(
         cls,
         query: str,
+        kb_id: str = None,
+        db: AsyncSession = None,
         top_k: int = None,
         use_rerank: bool = True,
     ) -> List[SearchResult]:
-        """异步查询检索 + GraphRAG 增强"""
-        # 检查缓存 (v2.3: 缓存 key 包含图谱版本)
-        cache_key = f"{query}:{top_k}:{use_rerank}:gv{_graph_version}"
+        """
+        异步查询检索 + GraphRAG 增强 (Phase 1)。
+
+        Args:
+            query: 用户查询
+            kb_id: 知识库ID（用于图检索）
+            db: 数据库会话（用于图检索）
+            top_k: 返回结果数
+            use_rerank: 是否启用重排序
+        """
+        # 检查缓存
+        cache_key = f"{query}:{kb_id}:{top_k}:{use_rerank}"
         cached = _search_cache.get(cache_key)
         if cached is not None:
             logger.debug(f"[RAG] 缓存命中: {query[:50]}...")
-            return cached
+            return cached  # type: ignore[return-value]
 
         t_start = time.monotonic()
 
         if top_k is None:
             top_k = config.HYBRID_SEARCH_TOP_K
 
-        # GraphRAG 增强: 用图谱实体扩展查询 (v2.3: 带锁保护)
-        if config.ENABLE_GRAPH_RAG and _graph_entity_index:
-            results = await _graph_enhanced_search_async(query, top_k, use_rerank)
+        # Phase 1: GraphRAG 增强 — 使用 GraphRetriever（当 kb_id 和 db 可用时）
+        if config.ENABLE_GRAPH_RAG and kb_id and db:
+            results = await _graph_enhanced_search_async(query, top_k, use_rerank, kb_id, db)
         else:
             results = _do_search(query, top_k, use_rerank)
 
         elapsed_ms = (time.monotonic() - t_start) * 1000
 
         # 缓存结果
-        _search_cache.set(cache_key, results)
+        _search_cache[cache_key] = results
 
         # 指标日志
         scores = [r.score for r in results] if results else []
@@ -215,6 +156,104 @@ class RAGService:
         )
 
         return results
+
+    @classmethod
+    async def global_search(
+        cls,
+        query: str,
+        kb_id: str,
+        db: AsyncSession,
+    ) -> dict:
+        """
+        全局搜索：使用社区摘要进行 Map-Reduce 式问答 (Microsoft GraphRAG 风格)。
+
+        适用场景: "这个知识库主要讲了什么？" / "有哪些核心主题？"
+
+        Map 阶段: 每个社区独立回答
+        Reduce 阶段: 综合所有社区答案生成最终回答
+        """
+        from app.services.graph_service import GraphService
+        from app.services.deepseek_client import DeepSeekClient
+
+        communities = await GraphService.detect_communities(db, kb_id)
+        if not communities:
+            return {
+                "answer": "该知识库暂无社区检测结果，请先上传文档构建知识图谱。",
+                "sources": [],
+            }
+
+        # 按社区大小排序，取 top N
+        top_communities = sorted(
+            communities, key=lambda c: c["node_count"], reverse=True
+        )[:config.GRAPH_GLOBAL_SEARCH_TOP_COMMUNITIES]
+
+        # Map: 每个社区并发回答
+        async def _map_community(comm):
+            context = GraphService.format_community_context(comm)
+            prompt = (
+                f"你是一个知识分析助手。以下是知识图谱中一个社区的摘要信息。\n\n"
+                f"社区内容:\n{context}\n\n"
+                f"请用简洁的中文回答以下问题（50-100字）:\n{query}\n\n"
+                f"如果该社区与问题无关，请回答「不相关」。"
+            )
+            try:
+                result = await DeepSeekClient.chat(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=512,
+                )
+                return {
+                    "community_id": comm["id"],
+                    "community_label": comm.get("label", ""),
+                    "answer": result["content"],
+                    "node_count": comm["node_count"],
+                }
+            except Exception as e:
+                logger.warning(f"社区 {comm['id']} 回答失败: {e}")
+                return None
+
+        # 使用 Semaphore 限制并发 API 调用（默认 3-5）
+        map_semaphore = asyncio.Semaphore(5)
+        async def _map_with_limit(comm):
+            async with map_semaphore:
+                return await _map_community(comm)
+
+        intermediate_answers_raw = await asyncio.gather(
+            *[_map_with_limit(comm) for comm in top_communities],
+            return_exceptions=True,
+        )
+        intermediate_answers = [a for a in intermediate_answers_raw if a is not None and not isinstance(a, Exception)]
+
+        if not intermediate_answers:
+            return {"answer": "无法生成全局回答，请重试。", "sources": []}
+
+        # Reduce: 综合所有社区答案
+        reduce_prompt = (
+            f"用户问题：{query}\n\n"
+            f"以下是对知识图谱中 {len(intermediate_answers)} 个不同社区的局部回答，"
+            f"请综合成一份全面的最终回答（200-400字）：\n\n"
+        )
+        for i, ans in enumerate(intermediate_answers):
+            reduce_prompt += (
+                f"社区{i+1}「{ans['community_label']}」"
+                f"（{ans['node_count']}个实体）：{ans['answer']}\n\n"
+            )
+
+        try:
+            final = await DeepSeekClient.chat(
+                messages=[{"role": "user", "content": reduce_prompt}],
+                temperature=0.3,
+                max_tokens=2048,
+            )
+        except Exception as e:
+            logger.error(f"全局搜索 Reduce 阶段失败: {e}")
+            return {"answer": "全局搜索生成失败，请重试。", "sources": []}
+
+        return {
+            "answer": final["content"],
+            "intermediate_answers": intermediate_answers,
+            "community_count": len(top_communities),
+        }
 
     @classmethod
     def build_context(
@@ -238,7 +277,6 @@ class RAGService:
                 break
 
             text = result.parent_text if result.parent_text else result.text
-            # v2.4: 安全处理 None text
             if not text:
                 continue
             # 文本去重
@@ -302,88 +340,55 @@ async def _graph_enhanced_search_async(
     query: str,
     top_k: int,
     use_rerank: bool,
+    kb_id: str,
+    db: AsyncSession,
 ) -> List[SearchResult]:
     """
-    GraphRAG 增强检索 (v2.3: 带 asyncio.Lock 保护)：
-    1. 从 query 中匹配图谱实体
-    2. 用关联实体名扩展 query
-    3. 原始 query + 扩展 query 各检索一轮
-    4. RRF 融合两轮结果
+    GraphRAG 增强检索 (Phase 1) — 使用 GraphRetriever 进行多跳图遍历。
+
+    流程：
+    1. GraphRetriever 定位种子实体 → BFS 多跳遍历
+    2. 收集遍历路径上的实体上下文
+    3. 图检索结果 + 混合检索结果 → RRF 融合
     """
+    from app.services.graph_retriever import GraphRetriever
+
     t0 = time.monotonic()
+    retriever = GraphRetriever()
 
-    # 1. 匹配图谱实体（带锁）
-    matched = await _extract_query_entities_async(query)
-
-    if not matched:
-        logger.debug("[GraphRAG] 未匹配到图谱实体，使用原始检索")
+    try:
+        graph_results = await retriever.retrieve(query, kb_id, db, top_k=top_k)
+    except Exception as e:
+        logger.warning(f"[GraphRAG] 图检索失败，回退到混合检索: {e}")
         return _do_search(query, top_k, use_rerank)
 
-    # 2. 收集关联实体（带锁读取）
-    lock = _get_lock()
-    async with lock:
-        expand_terms = []
-        seen_expand = set(matched)
-        for name in matched[:config.GRAPH_RAG_EXPAND_ENTITIES]:
-            info = _graph_entity_index.get(name, {})
-            for rel in info.get("related", [])[:5]:
-                if rel not in seen_expand:
-                    expand_terms.append(rel)
-                    seen_expand.add(rel)
-
-    if not expand_terms:
+    if not graph_results:
+        logger.debug("[GraphRAG] 图检索无结果，使用混合检索")
         return _do_search(query, top_k, use_rerank)
 
-    # 3. 扩展查询
-    expanded_query = query + " " + " ".join(expand_terms[:5])
-    logger.debug(f"[GraphRAG] 匹配实体: {matched[:3]}, 扩展词: {expand_terms[:5]}")
+    # 标准混合检索
+    hybrid_results = _do_search(query, top_k, use_rerank)
 
-    # 4. 两轮检索
-    raw_results = _do_search(query, top_k, use_rerank)
-    exp_results = _do_search(expanded_query, top_k, use_rerank)
+    # 将图检索结果转换为 SearchResult 格式
+    graph_as_search = []
+    for gr in graph_results:
+        graph_as_search.append(SearchResult(
+            chunk_id=f"graph:{gr.entity_id}",
+            text=gr.context_text,
+            score=gr.score * config.GRAPH_RETRIEVAL_WEIGHT,
+            source="graph_traversal",
+        ))
 
-    # 5. RRF 融合
-    merged = _rrf_fusion([raw_results, exp_results], k=60)
+    # RRF 融合：混合检索 + 图检索
+    merged = rrf_fusion([hybrid_results, graph_as_search], k=60)
     merged.sort(key=lambda r: r.score, reverse=True)
 
     elapsed = (time.monotonic() - t0) * 1000
     logger.debug(
-        f"[GraphRAG] 增强检索: raw={len(raw_results)} exp={len(exp_results)} "
+        f"[GraphRAG] 增强检索: hybrid={len(hybrid_results)} graph={len(graph_results)} "
         f"merged={len(merged)} | {elapsed:.0f}ms"
     )
 
     return merged[:top_k]
 
 
-def _rrf_fusion(
-    result_sets: List[List[SearchResult]],
-    k: int = 60,
-) -> List[SearchResult]:
-    """
-    Reciprocal Rank Fusion — 融合多轮检索结果。
-
-    为每个 chunk 计算 RRF 分数:
-        score = Σ 1/(k + rank_i)
-    其中 rank_i 是该 chunk 在第 i 轮结果中的排名。
-    """
-    chunk_scores: Dict[str, float] = {}
-    chunk_data: Dict[str, SearchResult] = {}
-
-    for results in result_sets:
-        for rank, r in enumerate(results, start=1):
-            cid = r.chunk_id
-            rrf_score = 1.0 / (k + rank)
-            chunk_scores[cid] = chunk_scores.get(cid, 0.0) + rrf_score
-            if cid not in chunk_data:
-                chunk_data[cid] = r
-
-    # 按 RRF 分数排序
-    sorted_ids = sorted(chunk_scores, key=chunk_scores.get, reverse=True)
-
-    merged = []
-    for cid in sorted_ids:
-        data = chunk_data[cid]
-        data.score = round(chunk_scores[cid], 4)
-        merged.append(data)
-
-    return merged

@@ -20,6 +20,9 @@ client = AsyncOpenAI(
     timeout=httpx.Timeout(120.0, connect=10.0),
 )
 
+# 全局 API 并发限制信号量（防止触发速率限制）
+_API_SEMAPHORE = asyncio.Semaphore(5)  # 最多 5 个并发 API 调用
+
 
 class DeepSeekClient:
     """DeepSeek V4 API 统一客户端"""
@@ -52,30 +55,31 @@ class DeepSeekClient:
         if not config.is_api_key_set:
             raise ValueError("DeepSeek API Key 未配置，请在 .env 中设置 DEEPSEEK_API_KEY")
 
-        for attempt in range(cls.MAX_RETRIES):
-            try:
-                response = await client.chat.completions.create(
-                    model=cls.CHAT_MODEL,
-                    messages=messages,
-                    temperature=temperature if temperature is not None else cls.TEMPERATURE,
-                    max_tokens=max_tokens if max_tokens is not None else cls.MAX_TOKENS,
-                    stream=False,
-                )
-                choice = response.choices[0]
-                return {
-                    "content": choice.message.content or "",
-                    "usage": {
-                        "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
-                        "completion_tokens": response.usage.completion_tokens if response.usage else 0,
-                        "total_tokens": response.usage.total_tokens if response.usage else 0,
-                    },
-                    "finish_reason": choice.finish_reason or "stop",
-                }
-            except Exception as e:
-                logger.warning(f"DeepSeek Chat 调用失败 (尝试 {attempt + 1}/{cls.MAX_RETRIES}): {e}")
-                if attempt == cls.MAX_RETRIES - 1 or not _is_retryable_error(e):
-                    raise
-                await asyncio.sleep(2 ** attempt)
+        async with _API_SEMAPHORE:
+            for attempt in range(cls.MAX_RETRIES):
+                try:
+                    response = await client.chat.completions.create(
+                        model=cls.CHAT_MODEL,
+                        messages=messages,
+                        temperature=temperature if temperature is not None else cls.TEMPERATURE,
+                        max_tokens=max_tokens if max_tokens is not None else cls.MAX_TOKENS,
+                        stream=False,
+                    )
+                    choice = response.choices[0]
+                    return {
+                        "content": choice.message.content or "",
+                        "usage": {
+                            "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+                            "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+                            "total_tokens": response.usage.total_tokens if response.usage else 0,
+                        },
+                        "finish_reason": choice.finish_reason or "stop",
+                    }
+                except Exception as e:
+                    logger.warning(f"DeepSeek Chat 调用失败 (尝试 {attempt + 1}/{cls.MAX_RETRIES}): {e}")
+                    if attempt == cls.MAX_RETRIES - 1 or not _is_retryable_error(e):
+                        raise
+                    await asyncio.sleep(2 ** attempt)
 
     @classmethod
     async def chat_stream(
@@ -93,24 +97,25 @@ class DeepSeekClient:
         if not config.is_api_key_set:
             raise ValueError("DeepSeek API Key 未配置")
 
-        for attempt in range(cls.MAX_RETRIES):
-            try:
-                stream = await client.chat.completions.create(
-                    model=cls.CHAT_MODEL,
-                    messages=messages,
-                    temperature=temperature if temperature is not None else cls.TEMPERATURE,
-                    max_tokens=max_tokens if max_tokens is not None else cls.MAX_TOKENS,
-                    stream=True,
-                )
-                async for chunk in stream:
-                    if chunk.choices and chunk.choices[0].delta.content:
-                        yield chunk.choices[0].delta.content
-                return
-            except Exception as e:
-                logger.warning(f"DeepSeek Stream 调用失败 (尝试 {attempt + 1}/{cls.MAX_RETRIES}): {e}")
-                if attempt == cls.MAX_RETRIES - 1 or not _is_retryable_error(e):
-                    raise
-                await asyncio.sleep(2 ** attempt)
+        async with _API_SEMAPHORE:
+            for attempt in range(cls.MAX_RETRIES):
+                try:
+                    stream = await client.chat.completions.create(
+                        model=cls.CHAT_MODEL,
+                        messages=messages,
+                        temperature=temperature if temperature is not None else cls.TEMPERATURE,
+                        max_tokens=max_tokens if max_tokens is not None else cls.MAX_TOKENS,
+                        stream=True,
+                    )
+                    async for chunk in stream:
+                        if chunk.choices and chunk.choices[0].delta.content:
+                            yield chunk.choices[0].delta.content
+                    return
+                except Exception as e:
+                    logger.warning(f"DeepSeek Stream 调用失败 (尝试 {attempt + 1}/{cls.MAX_RETRIES}): {e}")
+                    if attempt == cls.MAX_RETRIES - 1 or not _is_retryable_error(e):
+                        raise
+                    await asyncio.sleep(2 ** attempt)
 
     @classmethod
     async def embed(cls, texts: List[str]) -> List[List[float]]:
@@ -126,28 +131,27 @@ class DeepSeekClient:
         if not config.is_api_key_set:
             raise ValueError("DeepSeek API Key 未配置")
 
-        for attempt in range(cls.MAX_RETRIES):
-            try:
-                response = await client.embeddings.create(
-                    model=config.EMBEDDING_MODEL,  # v2.4: 使用 embedding 模型而非 chat 模型
-                    input=texts,
-                )
-                return [item.embedding for item in response.data]
-            except Exception as e:
-                err_str = str(e)
-                # v2.4: 基于 HTTP 状态码判断而非子串匹配
-                status = getattr(e, 'status_code', None)
-                if status == 404:
-                    logger.warning("DeepSeek Embedding 端点不可用 (404)，请使用本地模型")
-                    raise
-                logger.warning(f"DeepSeek Embedding 调用失败 (尝试 {attempt + 1}): {e}")
-                if attempt == cls.MAX_RETRIES - 1 or not _is_retryable_error(e):
-                    logger.error(
-                        "DeepSeek Embedding API 不可用。"
-                        f"请使用本地 Embedding 模型: {config.EMBEDDING_MODEL}"
+        async with _API_SEMAPHORE:
+            for attempt in range(cls.MAX_RETRIES):
+                try:
+                    response = await client.embeddings.create(
+                        model=config.EMBEDDING_MODEL,  # v2.4: 使用 embedding 模型而非 chat 模型
+                        input=texts,
                     )
-                    raise
-                await asyncio.sleep(2 ** attempt)
+                    return [item.embedding for item in response.data]
+                except Exception as e:
+                    status = getattr(e, 'status_code', None)
+                    if status == 404:
+                        logger.warning("DeepSeek Embedding 端点不可用 (404)，请使用本地模型")
+                        raise
+                    logger.warning(f"DeepSeek Embedding 调用失败 (尝试 {attempt + 1}): {e}")
+                    if attempt == cls.MAX_RETRIES - 1 or not _is_retryable_error(e):
+                        logger.error(
+                            "DeepSeek Embedding API 不可用。"
+                            f"请使用本地 Embedding 模型: {config.EMBEDDING_MODEL}"
+                        )
+                        raise
+                    await asyncio.sleep(2 ** attempt)
 
     @classmethod
     async def rewrite_query(cls, query: str, num_versions: int = 2) -> List[str]:

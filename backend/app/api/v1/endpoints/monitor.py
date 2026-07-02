@@ -1,6 +1,6 @@
 """
 系统监控 API - 任务进度查询、系统状态
-v2.4: 任务 TTL 自动清理 + 线程安全 + 版本号修正
+v3.1: 任务 TTL 自动清理 + 线程安全 + 版本号从 config 读取
 """
 import time
 import threading
@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 from typing import Dict, Optional
 from fastapi import APIRouter
+from app.core.config import config, APP_VERSION
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/monitor", tags=["系统监控"])
@@ -95,13 +96,11 @@ async def get_task(task_id: str):
 @router.get("/status")
 async def get_system_status():
     """获取系统运行状态"""
-    from app.core.config import config
-
     return {
         "status": "running",
         "api_configured": config.is_api_key_set,
         "api_model": config.DEEPSEEK_CHAT_MODEL,
-        "server_version": "2.4.0",
+        "server_version": APP_VERSION,
         "timestamp": datetime.now().isoformat(),
         "active_tasks": len(_task_store),
     }

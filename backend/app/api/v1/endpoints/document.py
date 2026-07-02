@@ -161,16 +161,16 @@ async def upload_document(
     await _validate_upload(file)
 
     # 验证知识库存在
-    kb_result = await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))
-    if not kb_result.scalar_one_or_none():
+    kb = (await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))).scalar_one_or_none()
+    if not kb:
         raise HTTPException(status_code=404, detail="知识库不存在")
 
-    # P0: 流式保存文件
-    ensure_dir(config.LOCAL_DATA_DIR)
+    # v3.2: 按知识库名称分文件夹存储，方便管理
+    kb_folder = sanitize_filename(kb.name)
+    upload_dir = os.path.join(config.LOCAL_DATA_DIR, kb_folder)
+    ensure_dir(upload_dir)
     safe_filename = sanitize_filename(raw_filename)
-    file_uuid = str(uuid.uuid4())
-    stored_name = f"{file_uuid}_{safe_filename}"
-    stored_path = os.path.join(config.LOCAL_DATA_DIR, stored_name)
+    stored_path = os.path.join(upload_dir, safe_filename)
 
     total_written = stream_save_upload(file.file, stored_path)
     await file.close()
@@ -259,9 +259,13 @@ async def batch_upload_documents(
         raise HTTPException(status_code=400, detail="单次批量上传不超过 20 个文件")
 
     # 验证知识库存在
-    kb_result = await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))
-    if not kb_result.scalar_one_or_none():
+    kb = (await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))).scalar_one_or_none()
+    if not kb:
         raise HTTPException(status_code=404, detail="知识库不存在")
+
+    kb_folder = sanitize_filename(kb.name)
+    upload_dir = os.path.join(config.LOCAL_DATA_DIR, kb_folder)
+    ensure_dir(upload_dir)
 
     items = []
     succeeded = 0
@@ -276,11 +280,8 @@ async def batch_upload_documents(
             await _validate_upload(file)
 
             # 保存文件
-            ensure_dir(config.LOCAL_DATA_DIR)
             safe_filename = sanitize_filename(raw_filename)
-            file_uuid = str(uuid.uuid4())
-            stored_name = f"{file_uuid}_{safe_filename}"
-            stored_path = os.path.join(config.LOCAL_DATA_DIR, stored_name)
+            stored_path = os.path.join(upload_dir, safe_filename)
 
             total_written = stream_save_upload(file.file, stored_path)
             await file.close()

@@ -6,7 +6,6 @@ P2: 批量上传、重新处理、去重检测
 import os
 import uuid
 import logging
-from datetime import datetime
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +25,7 @@ from app.schemas.document import (
     ReprocessResponse,
     DedupCheckResponse,
 )
-from app.utils.file_parser import read_file_content, get_file_info
+from app.utils.file_parser import get_file_info
 from app.utils.helpers import (
     format_file_size, ensure_dir, sanitize_filename,
     detect_mime_type, validate_file_allowed,

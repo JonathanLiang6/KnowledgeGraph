@@ -52,6 +52,8 @@ ENV/
 # Database & Vector Store (运行时数据 — 保留目录结构)
 # ------------------------------------------
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 backend/data/lancedb/*

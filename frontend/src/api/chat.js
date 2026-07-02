@@ -51,8 +51,10 @@ export function chatCompletionsStream(data, onChunk, onDone, onError) {
             }
             try {
               const json = JSON.parse(data)
-              const content = json.choices?.[0]?.delta?.content
-              if (content) onChunk?.(content)
+              const delta = json.choices?.[0]?.delta
+              const char = delta?.content
+              const charType = delta?.char_type || 'normal'
+              if (char) onChunk?.(char, charType)
             } catch (e) {
               // 非 JSON 行（如注释），跳过
               if (data.trim() && !data.startsWith(':')) {

@@ -27,6 +27,37 @@
 
     <!-- 主聊天区 -->
     <div class="chat-main">
+      <!-- 顶部模式切换栏 -->
+      <div class="chat-header">
+        <div class="mode-switcher">
+          <button
+            class="mode-tab"
+            :class="{ active: !useAgent }"
+            @click="useAgent = false"
+          >
+            <el-icon :size="14"><ChatDotRound /></el-icon>
+            知识库问答
+          </button>
+          <button
+            class="mode-tab"
+            :class="{ active: useAgent }"
+            @click="useAgent = true"
+          >
+            <el-icon :size="14"><Cpu /></el-icon>
+            Agent 推理
+          </button>
+          <el-tooltip v-if="useAgent" content="启用后，Agent 在本地知识库信息不足时可联网搜索" placement="bottom">
+            <button
+              class="web-toggle"
+              :class="{ active: enableWeb }"
+              @click="enableWeb = !enableWeb"
+            >
+              {{ enableWeb ? '联网' : '仅本地' }}
+            </button>
+          </el-tooltip>
+        </div>
+      </div>
+
       <div class="chat-messages" ref="messagesContainer">
         <!-- 空状态 -->
         <div v-if="messages.length === 0" class="welcome">
@@ -55,6 +86,23 @@
             <div class="msg-role-name">
               {{ msg.role === 'assistant' ? 'AI 助手' : '你' }}
             </div>
+            <!-- v4.0: Agent 推理步骤展示 -->
+            <div v-if="msg.reasoningSteps && msg.reasoningSteps.length > 0" class="msg-reasoning">
+              <details v-for="(step, si) in msg.reasoningSteps" :key="si" :open="si === msg.reasoningSteps.length - 1">
+                <summary class="reasoning-summary">
+                  <span class="reasoning-badge">{{ step.type === 'agent/thought' ? '💭 思考' : step.type === 'agent/action' ? '🔧 行动' : step.type === 'agent/observation' ? '👁 观察' : step.type }}</span>
+                </summary>
+                <div class="reasoning-content">
+                  <template v-if="step.type === 'agent/action'">
+                    <span class="reasoning-label">工具:</span> {{ step.tool }}<br>
+                    <span class="reasoning-label">参数:</span> {{ step.input }}
+                  </template>
+                  <template v-else>
+                    {{ step.content }}
+                  </template>
+                </div>
+              </details>
+            </div>
             <div
               class="msg-text"
               :class="{ 'msg-streaming': isStreaming && idx === messages.length - 1 && msg.role === 'assistant' }"
@@ -72,36 +120,17 @@
           v-if="isStreaming && messages.length > 0 && !messages[messages.length - 1].content"
           class="streaming-indicator"
         >
-          <span class="streaming-dot" />
+          <div class="streaming-dots">
+            <span class="streaming-dot" />
+            <span class="streaming-dot" />
+            <span class="streaming-dot" />
+          </div>
           <span class="streaming-text">AI 正在思考...</span>
         </div>
       </div>
 
       <!-- 底部操作栏 -->
       <div class="chat-footer">
-        <div class="mode-bar">
-          <div class="mode-left">
-            <el-switch
-              v-model="useAgent"
-              size="small"
-              active-text="Agent推理"
-              inactive-text="知识库问答"
-              style="--el-switch-on-color: #0D9488; --el-switch-off-color: #2D8C4E"
-            />
-          </div>
-          <div class="mode-right">
-            <el-tooltip content="启用后，Agent 在本地知识库信息不足时可联网搜索" placement="top">
-              <el-switch
-                v-model="enableWeb"
-                size="small"
-                active-text="🕸️ 联网"
-                inactive-text="📚 仅本地"
-                :disabled="!useAgent"
-                style="--el-switch-on-color: #E6A23C; --el-switch-off-color: #909399"
-              />
-            </el-tooltip>
-          </div>
-        </div>
         <div class="input-row">
           <div class="input-wrapper">
             <textarea
@@ -141,7 +170,7 @@
 import { ref, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { chatCompletionsStream } from '../api/chat'
-import { Cpu, User, Plus, Promotion, Close, WarningFilled } from '@element-plus/icons-vue'
+import { Cpu, User, Plus, Promotion, Close, WarningFilled, ChatDotRound } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -154,7 +183,7 @@ const messages = ref([])
 const inputText = ref('')
 const isStreaming = ref(false)
 const useAgent = ref(false)       // v3.2: Agent vs 知识库问答 切换
-const enableWeb = ref(true)       // v3.2: 联网搜索开关（仅在 Agent 模式下有效）
+const enableWeb = ref(false)      // v4.0: 联网搜索默认关闭，避免后端不支持时造成困惑
 
 let streamController = null
 let msgIdCounter = 0
@@ -206,7 +235,7 @@ function escapeHtml(text) {
 
 // v3.2: 流式 Markdown 渲染节流 — 避免逐字符调用 marked.parse()
 let streamingMdCache = ''
-let streamingMdRendered = ''
+const streamingMdRendered = ref('')       // v4.0: 使用 ref 让 Vue 自动追踪变化
 let mdRenderPending = false
 
 function renderMessageContent(msg, idx) {
@@ -219,7 +248,8 @@ function renderMessageContent(msg, idx) {
     const display = msg.content || ''
     // 节流：内容未变则复用缓存
     if (display === streamingMdCache) {
-      return streamingMdRendered + '<span class="typewriter-cursor">|</span>'
+      // v4.0: 读取 ref 让 Vue 自动追踪依赖，无需手动 messages hack
+      return streamingMdRendered.value + '<span class="typewriter-cursor">|</span>'
     }
     streamingMdCache = display
     // 用 requestAnimationFrame 节流，避免高频 DOM 更新卡顿
@@ -227,12 +257,11 @@ function renderMessageContent(msg, idx) {
       mdRenderPending = true
       requestAnimationFrame(() => {
         mdRenderPending = false
-        streamingMdRendered = renderMarkdown(streamingMdCache)
-        // 手动触发响应式更新
-        messages.value = [...messages.value]
+        // v4.0: 直接赋值 ref，Vue 响应式系统自动触发重新渲染
+        streamingMdRendered.value = renderMarkdown(streamingMdCache)
       })
     }
-    return streamingMdRendered + '<span class="typewriter-cursor">|</span>'
+    return streamingMdRendered.value + '<span class="typewriter-cursor">|</span>'
   }
   return renderMarkdown(msg.content)
 }
@@ -242,6 +271,7 @@ const typewriterQueue = []        // {char, type} — 非响应式数组（性�
 const typewriterRunning = ref(false)
 let typewriterTimeoutId = null
 let lastAutoSave = 0
+const MAX_QUEUE_SIZE = 2000       // v4.0: 队列长度上限，防止内存无限增长
 
 // 速度映射表
 const TYPE_SPEEDS = {
@@ -263,6 +293,15 @@ function getDelayForType(type) {
 }
 
 function enqueueChar(char, charType) {
+  // v4.0: 队列超限时合并相邻字符加速消费，防止内存无限增长
+  if (typewriterQueue.length >= MAX_QUEUE_SIZE) {
+    // 跳过排队，直接合并到最后一个字符
+    const last = typewriterQueue[typewriterQueue.length - 1]
+    if (last) {
+      last.char += char
+      return
+    }
+  }
   typewriterQueue.push({ char, type: charType || 'normal' })
   if (!typewriterRunning.value) {
     typewriterRunning.value = true
@@ -314,7 +353,7 @@ function cleanupTypewriter() {
   typewriterQueue.length = 0
   typewriterRunning.value = false
   streamingMdCache = ''
-  streamingMdRendered = ''
+  streamingMdRendered.value = ''
   if (typewriterTimeoutId !== null) {
     clearTimeout(typewriterTimeoutId)
     typewriterTimeoutId = null
@@ -401,7 +440,7 @@ async function sendMessage() {
       isStreaming.value = false
       streamController = null
       streamingMdCache = ''
-      streamingMdRendered = ''
+      streamingMdRendered.value = ''
       // 如果队列已空且打字机未运行，手动最终化
       if (typewriterQueue.length === 0 && !typewriterRunning.value) {
         if (!assistantMsg.content) {
@@ -419,6 +458,20 @@ async function sendMessage() {
       streamController = null
       saveMessages()
       ElMessage.error(`请求失败: ${err.message}`)
+    },
+    // v4.0: onAgentEvent — 处理 Agent 推理事件
+    (event) => {
+      // 将推理事件插入消息列表中（作为特殊卡片显示）
+      const type = event.type || ''
+      if (type === 'agent/thought' || type === 'agent/action' || type === 'agent/observation') {
+        // 在 assistant 消息中追加推理步骤标记
+        // v4.0: Vue 3 ref 自动追踪深层对象变更，无需手动触发更新
+        if (!assistantMsg.reasoningSteps) assistantMsg.reasoningSteps = []
+        assistantMsg.reasoningSteps.push(event)
+      }
+      if (type === 'agent/error') {
+        assistantMsg.error = event.content || '推理过程出错'
+      }
     }
   )
 }
@@ -495,9 +548,11 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 .chat-studio {
-  height: calc(100vh - 56px - 44px - var(--spacing-lg) * 2);
+  height: 100vh;
   display: flex;
   gap: 0;
+  overflow: hidden;
+  background: var(--bg-page);
 }
 
 // ── 侧边栏 ──────────────────────────────────────────
@@ -581,6 +636,7 @@ onBeforeUnmount(() => {
 .welcome {
   text-align: center;
   padding: 80px 20px 40px;
+  animation: fadeIn 0.5s ease;
 
   .welcome-icon {
     display: inline-block;
@@ -590,12 +646,17 @@ onBeforeUnmount(() => {
   }
 
   h2 {
-    font-size: 22px;
+    font-size: 24px;
     font-weight: 600;
     margin-bottom: var(--spacing-sm);
     color: var(--text-primary);
+    letter-spacing: var(--tracking-tight);
   }
-  p { color: var(--text-secondary); font-size: 14px; }
+  p {
+    color: var(--text-secondary);
+    font-size: 14px;
+    letter-spacing: 0.02em;
+  }
 }
 
 // 消息
@@ -668,6 +729,7 @@ onBeforeUnmount(() => {
   line-height: 1.75;
   box-shadow: var(--shadow-xs);
   border: 1px solid var(--border-light);
+  transition: box-shadow var(--transition-fast);
 
   :deep(p) { margin-bottom: 8px; &:last-child { margin-bottom: 0; } }
   :deep(pre) {
@@ -705,6 +767,53 @@ onBeforeUnmount(() => {
   gap: 5px;
 }
 
+// v4.0: Agent 推理步骤
+.msg-reasoning {
+  margin-bottom: 8px;
+
+  details {
+    background: var(--bg-page);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    margin-bottom: 4px;
+
+    &[open] {
+      border-color: var(--color-primary-light);
+    }
+  }
+
+  .reasoning-summary {
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    user-select: none;
+
+    .reasoning-badge {
+      font-weight: 500;
+    }
+  }
+
+  .reasoning-content {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+    padding: 4px 8px;
+    background: var(--bg-card);
+    border-radius: 4px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 120px;
+    overflow-y: auto;
+
+    .reasoning-label {
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+  }
+}
+
 // 打字机光标闪烁
 :deep(.typewriter-cursor) {
   display: inline-block;
@@ -724,43 +833,115 @@ onBeforeUnmount(() => {
 .streaming-indicator {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 8px 16px;
   animation: fadeInUp 0.3s ease both;
 
+  .streaming-dots {
+    display: inline-flex;
+    gap: 4px;
+  }
+
   .streaming-dot {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: var(--color-primary);
-    animation: dot-pulse 1.2s ease-in-out infinite;
+    animation: dotBounce 1.2s ease-in-out infinite;
+
+    &:nth-child(2) { animation-delay: 0.15s; }
+    &:nth-child(3) { animation-delay: 0.3s; }
   }
 
   .streaming-text {
     font-size: 13px;
     color: var(--text-tertiary);
+    letter-spacing: 0.02em;
   }
 }
 
+@keyframes dotBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+
 // ── 底部 ────────────────────────────────────────────
+// ── 顶部模式切换栏 ────────────────────────────────────
+.chat-header {
+  padding: 10px var(--spacing-lg);
+  background: var(--bg-glass);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+
+.mode-switcher {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-page);
+  padding: 3px;
+  border-radius: var(--radius-md);
+  width: fit-content;
+}
+
+.mode-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+
+  &:hover {
+    color: var(--text-primary);
+  }
+
+  &.active {
+    background: var(--bg-card);
+    color: var(--color-primary);
+    box-shadow: var(--shadow-xs);
+  }
+}
+
+.web-toggle {
+  margin-left: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--text-tertiary);
+  background: var(--bg-page);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+
+  &.active {
+    color: var(--color-primary);
+    background: rgba(58, 157, 91, 0.1);
+    border-color: rgba(58, 157, 91, 0.3);
+  }
+
+  &:hover {
+    color: var(--text-primary);
+  }
+}
+
 .chat-footer {
   padding: var(--spacing-md) var(--spacing-lg);
   background: var(--bg-glass);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
   border-top: 1px solid var(--border-light);
-}
-
-.mode-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: var(--spacing-sm);
-
-  .mode-left, .mode-right {
-    display: flex;
-    align-items: center;
-  }
 }
 
 .input-row {
@@ -790,7 +971,7 @@ onBeforeUnmount(() => {
   &::placeholder { color: var(--text-tertiary); }
   &:focus {
     border-color: var(--color-primary);
-    box-shadow: 0 0 0 3px rgba(45, 140, 78, 0.1);
+    box-shadow: 0 0 0 4px rgba(45, 140, 78, 0.12), 0 2px 8px rgba(45, 140, 78, 0.08);
   }
   &:disabled {
     background: var(--bg-page);

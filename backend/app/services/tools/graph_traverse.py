@@ -27,20 +27,20 @@ async def graph_traverse(
     from app.services.graph_service import GraphService
     from sqlalchemy import select
 
-    # 1. 定位起始实体
+    # 1. 定位起始实体（v4.0: 精确匹配优先，避免模糊匹配返回无关实体）
     stmt = select(GraphEntity).where(
         GraphEntity.kb_id == kb_id,
-        GraphEntity.name.contains(entity_name),
-    ).limit(3)
+        GraphEntity.name == entity_name,
+    )
     result = await db.execute(stmt)
     entities = result.scalars().all()
 
+    # 精确匹配无结果时回退到包含匹配
     if not entities:
-        # 尝试精确匹配
         stmt = select(GraphEntity).where(
             GraphEntity.kb_id == kb_id,
-            GraphEntity.name == entity_name,
-        )
+            GraphEntity.name.contains(entity_name),
+        ).limit(3)
         result = await db.execute(stmt)
         entities = result.scalars().all()
 

@@ -42,7 +42,16 @@
       "Bash(mkdir -p backend/data/lancedb backend/data/models)",
       "Bash(touch backend/data/.gitkeep backend/data/lancedb/.gitkeep backend/data/models/.gitkeep backend/inputs/files/.gitkeep)",
       "Bash(git rm *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git checkout *)",
+      "Bash(git commit -m 'v4.0: 拓扑导航台 + Agent联网搜索 + 多模态处理 + 知识覆盖诊断 + 项目结构优化 *)",
+      "Bash(git push *)",
+      "Bash(node -e ' *)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:pypi.org)",
+      "Bash(python -m pytest tests/test_hybrid_search.py -v)",
+      "Bash(python -m pytest tests/ -v --timeout=60)",
+      "Bash(python -m pytest tests/ -v)"
     ]
   }
 }

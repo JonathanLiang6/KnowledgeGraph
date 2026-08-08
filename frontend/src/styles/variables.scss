@@ -89,4 +89,11 @@
   --z-topbar: 50;
   --z-overlay: 200;
   --z-modal: 300;
+
+  // ── 字体反差系统 ──
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  --tracking-tight: -0.02em;
+  --tracking-tighter: -0.035em;
+  --tracking-wide: 0.04em;
 }

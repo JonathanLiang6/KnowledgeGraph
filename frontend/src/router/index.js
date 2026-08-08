@@ -33,6 +33,12 @@ const routes = [
         component: () => import('../views/ChatStudio.vue'),
         meta: { title: '智能问答 - KnowledgeGraph' },
       },
+      {
+        path: 'coverage',
+        name: 'KBCoverage',
+        component: () => import('../views/CoveragePage.vue'),
+        meta: { title: '知识体检 - KnowledgeGraph' },
+      },
     ],
   },
   // 旧路由 /kb 重定向到首页

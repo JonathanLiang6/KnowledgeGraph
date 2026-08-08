@@ -1,7 +1,6 @@
 <template>
   <div class="documents-page">
     <div class="page-header">
-      <h1 class="page-title">文档管理</h1>
       <div class="header-actions">
         <!-- v2.5: 进度条 -->
         <div v-if="uploading" class="upload-progress">
@@ -45,7 +44,11 @@
           </el-tooltip>
         </template>
       </el-table-column>
-      <el-table-column prop="file_type" label="类型" width="90" />
+      <el-table-column prop="file_type" label="类型" width="90">
+        <template #default="{ row }">
+          <span class="file-type-badge">{{ row.file_type }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="大小" width="100">
         <template #default="{ row }">{{ formatSize(row.file_size) }}</template>
       </el-table-column>
@@ -323,14 +326,18 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 .documents-page {
+  min-height: 100vh;
+  padding: var(--spacing-lg);
+
   .page-header {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
     margin-bottom: var(--spacing-md);
     flex-wrap: wrap;
     gap: 12px;
   }
+
   .header-actions {
     display: flex;
     align-items: center;
@@ -344,6 +351,7 @@ onBeforeUnmount(() => {
     background: var(--bg-card);
     border-radius: var(--radius-md);
     border: 1px solid var(--border-light);
+    box-shadow: var(--shadow-xs);
     animation: fadeInUp 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
 
     :deep(.el-progress-bar__inner) {
@@ -362,6 +370,11 @@ onBeforeUnmount(() => {
     display: flex;
     gap: var(--spacing-sm);
     margin-bottom: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-xs);
   }
   .file-name {
     font-weight: 500;
@@ -371,6 +384,18 @@ onBeforeUnmount(() => {
     :deep(.el-table__row:hover) & {
       color: var(--color-primary);
     }
+  }
+  .file-type-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    color: var(--color-primary);
+    background: var(--color-success-bg);
+    border-radius: var(--radius-xs);
+    text-transform: uppercase;
+    font-family: var(--font-mono);
   }
   .error-icon {
     margin-left: 6px;
@@ -386,6 +411,9 @@ onBeforeUnmount(() => {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+    padding: var(--spacing-sm);
+    background: var(--bg-page);
+    border-radius: var(--radius-sm);
   }
 }
 </style>

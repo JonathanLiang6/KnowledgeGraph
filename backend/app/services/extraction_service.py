@@ -38,10 +38,12 @@ class ExtractionService:
                 result = await LLMEntityRefiner.refine(text, entities)
                 entities = result.get("entities", entities)
                 relationships = result.get("relationships", relationships)
-                # 更新 legend（加入新类型）
+                # v4.0: 更新 legend（为新类型分配统一配色）
+                from app.core.colors import get_color_for_type
                 for ent in entities:
-                    if ent["type"] not in legend:
-                        legend[ent["type"]] = ent.get("color", "#4F8CF7")
+                    etype = ent.get("type", "概念")
+                    if etype not in legend:
+                        legend[etype] = get_color_for_type(etype, len(legend))
                 logger.info(f"Stage 2 (LLM): {len(entities)} 实体, {len(relationships)} 关系")
             except Exception as e:
                 logger.warning(f"LLM 精炼失败，使用 NLP 粗筛结果: {e}")
@@ -56,7 +58,8 @@ class ExtractionService:
                 "name": e["name"],
                 "type": e["type"],
                 "weight": e.get("confidence", e.get("weight", 0.5)),
-                "color": e.get("color", legend.get(e["type"], "#4F8CF7")),
+                # v4.0: 统一从 legend 取值，无匹配时使用 get_color_for_type 生成
+                "color": e.get("color") or legend.get(e["type"], "#4F8CF7"),
             }
             for e in entities
         ]

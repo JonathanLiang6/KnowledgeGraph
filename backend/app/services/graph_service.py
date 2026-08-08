@@ -34,13 +34,16 @@ _nx_cache_lock = asyncio.Lock()
 _kb_versions: Dict[str, int] = defaultdict(int)
 # 每个 kb_id 的写锁，防止并发写入产生重复实体
 _kb_write_locks: Dict[str, asyncio.Lock] = {}
+# v4.0: 社区检测结果缓存，随图版本失效
+_community_cache: Dict[str, Tuple[List[dict], int]] = {}
 
 
-def _get_kb_write_lock(kb_id: str) -> asyncio.Lock:
-    """获取指定 KB 的写锁（懒创建）"""
-    if kb_id not in _kb_write_locks:
-        _kb_write_locks[kb_id] = asyncio.Lock()
-    return _kb_write_locks[kb_id]
+async def _get_kb_write_lock(kb_id: str) -> asyncio.Lock:
+    """获取指定 KB 的写锁（v4.0: 使用 _nx_cache_lock 保护懒创建，消除竞态条件）"""
+    async with _nx_cache_lock:
+        if kb_id not in _kb_write_locks:
+            _kb_write_locks[kb_id] = asyncio.Lock()
+        return _kb_write_locks[kb_id]
 
 
 # ============================================================
@@ -91,15 +94,19 @@ class GraphService:
         if not nodes:
             return stats
 
-        lock = _get_kb_write_lock(kb_id)
+        lock = await _get_kb_write_lock(kb_id)
         async with lock:
-            # 批量预取该 KB 下所有已有实体（避免 N+1 查询）
-            existing_stmt = select(GraphEntity).where(GraphEntity.kb_id == kb_id)
-            existing_result = await db.execute(existing_stmt)
+            # v4.0: 仅预取本次涉及名称的已有实体（避免全量加载大型知识库）
+            incoming_names = list({(n.get("name") or "").strip() for n in nodes if (n.get("name") or "").strip()})
             existing_entities: Dict[Tuple[str, str], GraphEntity] = {}
-            for e in existing_result.scalars():
-                key = (e.name, e.entity_type)
-                existing_entities[key] = e
+            if incoming_names:
+                name_stmt = select(GraphEntity).where(
+                    and_(GraphEntity.kb_id == kb_id, GraphEntity.name.in_(incoming_names))
+                )
+                name_result = await db.execute(name_stmt)
+                for e in name_result.scalars():
+                    key = (e.name, e.entity_type)
+                    existing_entities[key] = e
 
             # Step 1: 实体对齐与持久化
             node_id_map: Dict[str, str] = {}  # 原始 node_id -> 数据库 entity.id
@@ -314,9 +321,10 @@ class GraphService:
 
     @classmethod
     def _invalidate_nx_cache(cls, kb_id: str) -> None:
-        """使指定 KB 的 NetworkX 缓存失效"""
+        """使指定 KB 的 NetworkX 缓存和社区检测缓存失效"""
         _kb_versions[kb_id] = _kb_versions.get(kb_id, 0) + 1
         _nx_cache.pop(kb_id, None)
+        _community_cache.pop(kb_id, None)  # v4.0: 社区缓存跟随图版本失效
 
     # ---------- 图遍历 ----------
 
@@ -447,14 +455,16 @@ class GraphService:
                     "sentence": data.get("sentence", ""),
                 })
 
+        # 从 NetworkX 图节点获取实体属性
+        entity_data = G.nodes[entity_id] if entity_id in G else {}
         return {
             "entity": {
                 "id": entity_id,
-                "name": entity.get("name", ""),
-                "type": entity.get("entity_type", ""),
-                "description": entity.get("description", ""),
-                "weight": entity.get("weight", 0.5),
-                "color": entity.get("color", "#4F8CF7"),
+                "name": entity_data.get("name", ""),
+                "type": entity_data.get("entity_type", ""),
+                "description": entity_data.get("description", ""),
+                "weight": entity_data.get("weight", 0.5),
+                "color": entity_data.get("color", "#4F8CF7"),
             },
             "neighbors": neighbors,
             "subgraph_nodes": subgraph_nodes,
@@ -580,7 +590,7 @@ class GraphService:
         min_size: Optional[int] = None,
     ) -> List[dict]:
         """
-        Louvain 社区检测。
+        Louvain 社区检测（v4.0: 带 NetworkX 缓存，随图版本失效）。
 
         Returns:
             [{"id": "community_0", "label": "...", "node_ids": [...],
@@ -588,6 +598,13 @@ class GraphService:
         """
         if min_size is None:
             min_size = config.GRAPH_COMMUNITY_MIN_SIZE
+
+        # v4.0: 检查社区检测缓存
+        async with _nx_cache_lock:
+            if kb_id in _community_cache:
+                cached_comms, cached_version = _community_cache[kb_id]
+                if cached_version == _kb_versions.get(kb_id, 0):
+                    return cached_comms
 
         G = await cls.load_networkx(db, kb_id)
         if G.number_of_nodes() < min_size:
@@ -648,6 +665,12 @@ class GraphService:
 
         # 按节点数降序
         result.sort(key=lambda c: c["node_count"], reverse=True)
+
+        # v4.0: 缓存社区检测结果
+        async with _nx_cache_lock:
+            version = _kb_versions.get(kb_id, 0)
+            _community_cache[kb_id] = (result, version)
+
         return result
 
     @classmethod

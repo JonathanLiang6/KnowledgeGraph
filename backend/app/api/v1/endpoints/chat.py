@@ -1,6 +1,7 @@
 """
 智能问答 API - 多模式问答 + SSE 流式输出 + Agentic RAG (Phase 2)
 """
+import asyncio
 import json
 import time
 import uuid
@@ -12,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_db
 from app.core.config import config
-from app.models.document import Document
+from app.models.document import Document, DocumentStatus
 from app.services.deepseek_client import DeepSeekClient
 from app.services.char_stream import char_stream
 from app.schemas.chat import (
@@ -53,7 +54,7 @@ async def clear_agent_memory(
 ):
     """清除 Agent 会话记忆（v3.2: kb_id 隔离）"""
     from app.services.agent_service import ReActAgent
-    ReActAgent.clear_session(kb_id, session_id)
+    await ReActAgent.clear_session(kb_id, session_id)
     return {"status": "ok", "message": f"会话 {session_id} (kb={kb_id}) 的记忆已清除"}
 
 
@@ -266,9 +267,10 @@ async def _stream_agent_response(
 
 
 async def _char_by_char(text: str):
-    """将文本逐字符 yield（模拟流式输出）"""
+    """将文本逐字符 yield（v4.0: 添加 asyncio.sleep(0) 让出事件循环）"""
     for char in text:
         yield char
+        await asyncio.sleep(0)  # 让出事件循环，避免阻塞其他协程
 
 
 async def _build_rag_messages(
@@ -323,7 +325,7 @@ async def _build_rag_messages(
             result = await db.execute(
                 select(Document).where(
                     Document.kb_id == kb_id,
-                    Document.status == "done",
+                    Document.status == DocumentStatus.DONE,
                 )
             )
             docs = result.scalars().all()

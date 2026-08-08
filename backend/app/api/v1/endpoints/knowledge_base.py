@@ -143,6 +143,25 @@ async def delete_knowledge_base(kb_id: str, db: AsyncSession = Depends(get_db)):
     except Exception as e:
         logger.warning(f"清理检索索引失败（非致命）: {e}")
 
+    # 删除关联的拓扑节点（如果存在）
+    try:
+        from app.models.topology import TopologyNode, TopologyEdge
+        node_stmt = select(TopologyNode).where(TopologyNode.kb_id == kb_id)
+        node_result = await db.execute(node_stmt)
+        node = node_result.scalar_one_or_none()
+        if node:
+            # 删除该节点的所有边
+            edge_stmt = select(TopologyEdge).where(
+                (TopologyEdge.source_id == node.id) | (TopologyEdge.target_id == node.id)
+            )
+            edge_result = await db.execute(edge_stmt)
+            for edge in edge_result.scalars():
+                await db.delete(edge)
+            await db.delete(node)
+            logger.info(f"已删除关联的拓扑节点: {node.name}")
+    except Exception as e:
+        logger.warning(f"清理拓扑节点失败（非致命）: {e}")
+
     # 删除 KB（级联删除文档记录）
     await db.delete(kb)
     await db.flush()

@@ -11,7 +11,6 @@ from typing import List, Optional, Set, Tuple
 from dataclasses import dataclass, field
 from collections import deque
 
-import jieba
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +19,33 @@ from app.models.graph_entity import GraphEntity
 from app.services.graph_service import GraphService
 
 logger = logging.getLogger(__name__)
+
+# ── jieba 可用性检查（带降级机制）──────────────────────────────
+_jieba_available = False
+try:
+    import jieba
+    # 预热测试
+    list(jieba.cut("测试分词"))
+    _jieba_available = True
+except Exception:
+    logger.warning("jieba 不可用，图检索将使用字符级关键词提取")
+
+
+def _tokenize_query(text: str) -> list:
+    """提取查询关键词（v4.0: 带 jieba 降级机制）"""
+    if _jieba_available:
+        try:
+            tokens = list(jieba.cut(text))
+            return [t.strip() for t in tokens if len(t.strip()) >= 2]
+        except Exception as e:
+            logger.warning(f"jieba 分词失败: {e}，回退到字符级关键词提取")
+
+    # 回退：提取连续中文字符和英文单词作为关键词
+    import re
+    tokens = []
+    for match in re.finditer(r'[一-鿿]{2,}|[a-zA-Z]{2,}|\d+', text):
+        tokens.append(match.group())
+    return tokens
 
 
 @dataclass
@@ -109,9 +135,8 @@ class GraphRetriever:
         2. 对每个关键词在 DB 中做 LIKE 匹配
         3. 完全匹配 > 前缀匹配 > 子串匹配，按实体权重加权
         """
-        # jieba 分词
-        tokens = list(jieba.cut(query))
-        keywords = [t.strip() for t in tokens if len(t.strip()) >= 2]
+        # 提取关键词（v4.0: 带 jieba 降级机制）
+        keywords = _tokenize_query(query)
 
         if not keywords:
             return []

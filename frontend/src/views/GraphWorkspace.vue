@@ -1,76 +1,68 @@
 <template>
   <div class="graph-workspace">
-    <div class="graph-toolbar">
-      <h1 class="page-title">知识图谱</h1>
-      <div class="toolbar-actions">
-        <div class="size-control">
-          <el-icon :size="14"><Minus /></el-icon>
-          <el-slider
-            v-model="nodeSizeScale"
-            :min="0.5"
-            :max="1.5"
-            :step="0.1"
-            style="width:100px"
-            @input="onSizeChange"
-          />
-          <el-icon :size="14"><Plus /></el-icon>
-          <span class="size-label">节点 {{ Math.round(nodeSizeScale * 100) }}%</span>
-        </div>
-        <div class="weight-control">
-          <span class="weight-label">权重 ≥</span>
-          <el-slider
-            v-model="minWeight"
-            :min="0"
-            :max="1"
-            :step="0.05"
-            style="width:80px"
-            @input="onWeightChange"
-          />
-          <span class="size-label">{{ minWeight.toFixed(2) }}</span>
-        </div>
-        <button class="btn-secondary btn-sm" @click="resetView">重置视图</button>
-        <button class="btn-primary btn-sm" @click="refreshData">刷新数据</button>
-      </div>
-    </div>
-
     <div class="graph-main">
       <canvas ref="canvasRef" class="graph-canvas" />
 
-      <!-- 图例 + 类型筛选 -->
-      <div class="legend-panel glass-card" v-if="legend && Object.keys(legend).length > 0">
-        <div class="legend-header">
-          <h4>图例</h4>
-          <div class="legend-toggle">
-            <button class="legend-btn" @click="toggleAllTypes(true)">全选</button>
-            <button class="legend-btn" @click="toggleAllTypes(false)">全不选</button>
+      <!-- 右侧面板容器（上中下排布） -->
+      <div class="right-panels">
+        <!-- 上：图谱统计 -->
+        <div class="stats-panel glass-card">
+          <h4>图谱统计</h4>
+          <div class="stat-row"><span>节点数</span><strong>{{ nodeCount }}</strong></div>
+          <div class="stat-row"><span>边数</span><strong>{{ linkCount }}</strong></div>
+          <div class="stat-row" v-if="bridgeCount > 0">
+            <span>虚线桥接</span><strong>{{ bridgeCount }}</strong>
           </div>
         </div>
-        <div v-for="(color, type) in legend" :key="type" class="legend-item">
-          <label class="legend-label" :style="{ opacity: hiddenTypes.has(type) ? 0.4 : 1 }">
-            <input
-              type="checkbox"
-              :checked="!hiddenTypes.has(type)"
-              @change="toggleType(type)"
-            />
-            <span class="legend-dot" :style="{ background: color }" />
-            <span>{{ type }}</span>
-          </label>
+
+        <!-- 中：图例 + 类型筛选 -->
+        <div class="legend-panel glass-card" v-if="legend && Object.keys(legend).length > 0">
+          <div class="legend-header">
+            <h4>图例</h4>
+            <div class="legend-toggle">
+              <button class="legend-btn" @click="toggleAllTypes(true)">全选</button>
+              <button class="legend-btn" @click="toggleAllTypes(false)">全不选</button>
+            </div>
+          </div>
+          <div v-for="(color, type) in legend" :key="type" class="legend-item">
+            <label class="legend-label" :style="{ opacity: hiddenTypes.has(type) ? 0.4 : 1 }">
+              <input
+                type="checkbox"
+                :checked="!hiddenTypes.has(type)"
+                @change="toggleType(type)"
+              />
+              <span class="legend-dot" :style="{ background: color }" />
+              <span>{{ type }}</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 下：工具栏（调整/重置/更新） -->
+        <div class="toolbar-panel glass-card">
+          <div class="size-control">
+            <span class="size-label">大小</span>
+            <el-slider v-model="nodeSizeScale" :min="0.5" :max="1.5" :step="0.1" :show-input="false" width="100" @input="onSizeChange" />
+          </div>
+          <div class="weight-control">
+            <span class="size-label">权重</span>
+            <el-slider v-model="minWeight" :min="0" :max="1" :step="0.05" :show-input="false" width="100" @input="onWeightChange" />
+          </div>
+          <div class="toolbar-buttons">
+            <button class="btn-secondary btn-sm" @click="resetView">重置视图</button>
+            <button class="btn-primary btn-sm" @click="refreshData">刷新数据</button>
+          </div>
         </div>
       </div>
 
-      <!-- 统计 -->
-      <div class="stats-panel glass-card">
-        <h4>图谱统计</h4>
-        <div class="stat-row"><span>节点数</span><strong>{{ nodeCount }}</strong></div>
-        <div class="stat-row"><span>边数</span><strong>{{ linkCount }}</strong></div>
-        <div class="stat-row" v-if="bridgeCount > 0">
-          <span>虚线桥接</span><strong>{{ bridgeCount }}</strong>
-        </div>
-      </div>
-
-      <!-- 操作提示 -->
+      <!-- 底部操作提示（居中） -->
       <div class="hint-bar">
-        <span>🖱 滚轮缩放 &nbsp;|&nbsp; 拖拽平移 &nbsp;|&nbsp; 点击节点查看详情 &nbsp;|&nbsp; 图例筛选类型</span>
+        <span>滚轮缩放</span>
+        <span class="hint-divider">|</span>
+        <span>拖拽平移</span>
+        <span class="hint-divider">|</span>
+        <span>点击节点查看详情</span>
+        <span class="hint-divider">|</span>
+        <span>图例筛选类型</span>
       </div>
     </div>
 
@@ -253,10 +245,16 @@ async function refreshData() {
 function resetView() { refreshData() }
 
 function updateSize() {
-  graphWidth.value = window.innerWidth - 340
-  graphHeight.value = window.innerHeight - 240
-  if (renderer) renderer.resize(graphWidth.value, graphHeight.value)
-}
+    const container = canvasRef.value?.parentElement
+    if (container) {
+      graphWidth.value = container.clientWidth
+      graphHeight.value = container.clientHeight
+    } else {
+      graphWidth.value = window.innerWidth - 280
+      graphHeight.value = window.innerHeight - 60
+    }
+    if (renderer) renderer.resize(graphWidth.value, graphHeight.value)
+  }
 
 watch(() => route.params.id, () => refreshData())
 
@@ -274,46 +272,18 @@ onUnmounted(() => {
 
 <style scoped lang="scss">
 .graph-workspace {
-  height: calc(100vh - 56px - 44px - var(--spacing-lg) * 2);
+  height: 100vh;
   display: flex;
   flex-direction: column;
+  margin: 0;
+  padding: 0;
 }
 
-.graph-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: var(--spacing-md);
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  gap: var(--spacing-sm);
-
-  .toolbar-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-md);
-    flex-wrap: wrap;
-  }
-}
-
-.size-control,
-.weight-control {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  color: var(--text-secondary);
-  font-size: 13px;
-
-  :deep(.el-slider__bar) {
-    background: var(--color-primary-gradient);
-  }
-
-  .size-label {
-    font-size: 12px;
-    color: var(--text-tertiary);
-    white-space: nowrap;
-    min-width: 36px;
-  }
+.graph-main {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
 }
 
 .weight-label {
@@ -330,14 +300,9 @@ onUnmounted(() => {
 .graph-main {
   flex: 1;
   position: relative;
-  background: var(--bg-card);
-  border-radius: var(--radius-md);
   overflow: hidden;
-  border: 1px solid var(--border-light);
-  box-shadow:
-    inset 0 2px 8px rgba(0, 0, 0, 0.03),
-    var(--shadow-sm);
   min-height: 0;
+  background: var(--bg-card);
 }
 
 .graph-canvas {
@@ -346,17 +311,31 @@ onUnmounted(() => {
   display: block;
 }
 
-// ── 图例面板 ──────────────────────────────────────────
-.legend-panel {
+// ── 右侧面板容器（上中下排布） ──────────────────────
+.right-panels {
   position: absolute;
   top: var(--spacing-md);
   right: var(--spacing-md);
-  padding: var(--spacing-md);
-  min-width: 140px;
-  max-height: 55%;
-  overflow-y: auto;
+  bottom: var(--spacing-md);
+  width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
   z-index: 10;
-  animation: fadeInUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  pointer-events: none;
+
+  > * {
+    pointer-events: auto;
+  }
+}
+
+// ── 图例面板 ──────────────────────────────────────────
+.legend-panel {
+  padding: var(--spacing-md);
+  min-width: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  animation: fadeInUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
 
   h4 { font-size: 13px; margin: 0; color: var(--text-secondary); }
 
@@ -391,14 +370,75 @@ onUnmounted(() => {
 }
 
 .stats-panel {
-  position: absolute;
-  top: var(--spacing-md);
-  left: var(--spacing-md);
   padding: var(--spacing-md);
-  min-width: 120px;
-  animation: fadeInUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
+  min-width: 0;
+  animation: fadeInUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
 
   h4 { font-size: 13px; margin-bottom: var(--spacing-sm); color: var(--text-secondary); }
+}
+
+// 工具栏面板
+.toolbar-panel {
+  padding: var(--spacing-md);
+  min-width: 0;
+  animation: fadeInUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.2s both;
+
+  .size-control,
+  .weight-control {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+
+    .size-label {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      white-space: nowrap;
+      min-width: 28px;
+    }
+
+    :deep(.el-slider__bar) {
+      background: var(--color-primary-gradient);
+    }
+  }
+
+  .toolbar-buttons {
+    display: flex;
+    gap: 6px;
+    margin-top: var(--spacing-sm);
+
+    .btn-sm {
+      flex: 1;
+      padding: 6px 8px;
+      font-size: 12px;
+    }
+  }
+}
+
+// 底部操作提示（居中）
+.hint-bar {
+  position: absolute;
+  bottom: var(--spacing-md);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--bg-glass);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 6px 16px;
+  border-radius: var(--radius-full);
+  pointer-events: none;
+  box-shadow: var(--shadow-sm);
+  z-index: 10;
+
+  .hint-divider {
+    color: var(--border-light);
+    margin: 0 2px;
+  }
 }
 
 .legend-item {
@@ -450,31 +490,16 @@ onUnmounted(() => {
   gap: var(--spacing-md);
 
   strong {
-    color: var(--color-primary);
     font-size: 15px;
+    font-weight: 600;
+    color: var(--color-primary);
+    font-family: var(--font-mono);
     transition: transform var(--transition-fast);
   }
 
   &:hover strong {
-    transform: scale(1.1);
+    transform: translateX(2px);
   }
-}
-
-.hint-bar {
-  position: absolute;
-  bottom: var(--spacing-md);
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 11px;
-  color: var(--text-tertiary);
-  background: var(--bg-glass);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  padding: 6px 16px;
-  border-radius: var(--radius-full);
-  pointer-events: none;
-  box-shadow: var(--shadow-sm);
-  transition: opacity 0.5s ease;
 }
 
 .entity-detail {
@@ -508,6 +533,7 @@ onUnmounted(() => {
         font-size: 22px;
         font-weight: 600;
         color: var(--color-primary);
+        font-family: var(--font-mono);
         transition: transform var(--transition-fast);
       }
     }

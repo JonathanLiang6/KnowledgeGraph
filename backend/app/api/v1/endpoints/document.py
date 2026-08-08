@@ -473,8 +473,17 @@ async def delete_document(doc_id: str, db: AsyncSession = Depends(get_db)):
     except Exception as e:
         logger.warning(f"清理检索索引失败（非致命）: {e}")
 
+    # v4.0: 使检索缓存失效，避免用户看到已删除文档的过时结果
+    kb_id = doc.kb_id
     await db.delete(doc)
     await db.flush()
+
+    try:
+        from app.services.rag_service import invalidate_kb_cache
+        invalidate_kb_cache(kb_id)
+    except Exception as e:
+        logger.warning(f"缓存失效失败（非致命）: {e}")
+
     return {"message": f"文档 '{doc.filename}' 已删除", "id": doc_id}
 
 
@@ -490,15 +499,16 @@ async def get_document_stats(db: AsyncSession = Depends(get_db)):
     processing_statuses = ["parsing", "nlp_extracting", "llm_refining",
                            "chunking", "embedding", "indexing"]
 
+    # v4.0: 使用 DocumentStatus 枚举替代硬编码字符串，避免未来枚举值变化时静默失败
     stats_query = select(
         func.count(Document.id).label("total"),
         func.coalesce(func.sum(Document.entity_count), 0).label("total_entities"),
         func.coalesce(func.sum(Document.relationship_count), 0).label("total_relations"),
         func.coalesce(func.sum(Document.file_size), 0).label("total_size"),
-        func.count().filter(Document.status == "done").label("done_count"),
-        func.count().filter(Document.status == "failed").label("failed_count"),
+        func.count().filter(Document.status == DocumentStatus.DONE).label("done_count"),
+        func.count().filter(Document.status == DocumentStatus.FAILED).label("failed_count"),
         func.count().filter(Document.status.in_(processing_statuses)).label("processing_count"),
-        func.count().filter(Document.status == "pending").label("pending_count"),
+        func.count().filter(Document.status == DocumentStatus.PENDING).label("pending_count"),
     )
     result = await db.execute(stats_query)
     row = result.one()

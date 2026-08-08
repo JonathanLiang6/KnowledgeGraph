@@ -5,10 +5,10 @@ import json
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from app.core.database import get_db
 from app.core.colors import TYPE_COLORS, get_color_for_type, get_legend
-from app.models.document import Document
+from app.models.document import Document, DocumentStatus
 from app.schemas.graph import (
     GraphData, GraphNode, GraphLink, EntityDetail,
     GraphPath, PathsResponse, CommunityInfo, CommunityDetail,
@@ -102,7 +102,11 @@ async def cleanup_orphan_nodes(
     kb_id: str = Query(..., description="知识库ID"),
     db: AsyncSession = Depends(get_db),
 ):
-    """v3.2: 清理知识库中无法建立任何链接的孤立节点"""
+    """
+    v3.2: 清理知识库中无法建立任何链接的孤立节点。
+
+    TODO(v4.0): 未来添加多用户支持时，需在此处验证用户对 kb_id 的操作权限。
+    """
     from app.services.graph_service import GraphService
 
     result = await GraphService.clean_orphan_nodes(db, kb_id)
@@ -130,71 +134,63 @@ async def get_graph_data(
     limit: int = Query(200, ge=10, le=2000, description="节点数量上限"),
     db: AsyncSession = Depends(get_db),
 ):
-    """获取知识图谱数据"""
-    query = select(Document).where(Document.status == "done")
+    """获取知识图谱数据（Phase 1: 从 GraphEntity/GraphRelation 独立表读取）"""
+    from app.services.graph_service import GraphService
+    from app.models.graph_entity import GraphEntity, GraphRelation
+
+    # 从独立图存储表加载 NetworkX 图
     if kb_id:
-        query = query.where(Document.kb_id == kb_id)
-    result = await db.execute(query)
-    docs = result.scalars().all()
+        G = await GraphService.load_networkx(db, kb_id)
+    else:
+        # 无 kb_id 时聚合所有 KB 的数据
+        G = None
 
-    if not docs:
-        return _get_demo_graph_data()
+    if G is None or G.number_of_nodes() == 0:
+        # 回退：尝试从旧 Document.graph_data 读取（向后兼容）
+        query = select(Document).where(Document.status == DocumentStatus.DONE)
+        if kb_id:
+            query = query.where(Document.kb_id == kb_id)
+        result = await db.execute(query)
+        docs = result.scalars().all()
+        if not docs:
+            return _get_demo_graph_data()
+        return _build_graph_from_documents(docs, limit)
 
+    # 从 NetworkX 图构建响应
     nodes_map = {}
     links = []
-    color_idx = 0
     entity_types = set()
+    color_idx = 0
 
-    for doc in docs:
-        if doc.graph_data:
-            try:
-                stored = doc.graph_data  # v2.4: JSON 列自动反序列化
-                for node in stored.get("nodes", []):
-                    nid = node.get("id", "")
-                    if nid and nid not in nodes_map:
-                        etype = node.get("type", "概念")
-                        color = get_color_for_type(etype, color_idx)
-                        nodes_map[nid] = GraphNode(
-                            id=nid,
-                            name=node.get("name", nid),
-                            type=etype,
-                            weight=node.get("weight", 0.5),
-                            color=color,
-                        )
-                        color_idx += 1
-                        entity_types.add(etype)
-                for link in stored.get("links", []):
-                    links.append(GraphLink(
-                        id=link.get("id", ""),
-                        source=link.get("source", ""),
-                        target=link.get("target", ""),
-                        relation=link.get("relation", "关联"),
-                        value=link.get("value", 0.5),
-                        sentence=link.get("sentence", ""),
-                        dashed=link.get("dashed", False),
-                    ))
-            except (json.JSONDecodeError, TypeError) as e:
-                logger.warning(f"解析文档图谱数据失败: {e}")
+    for node_id, node_data in G.nodes(data=True):
+        if len(nodes_map) >= limit:
+            break
+        etype = node_data.get("entity_type", "概念")
+        color = get_color_for_type(etype, color_idx)
+        nodes_map[node_id] = GraphNode(
+            id=node_id,
+            name=node_data.get("name", node_id),
+            type=etype,
+            weight=node_data.get("weight", 0.5),
+            color=color,
+        )
+        color_idx += 1
+        entity_types.add(etype)
 
-    if not nodes_map and docs:
-        for doc in docs:
-            nid = doc.id
-            if nid not in nodes_map:
-                nodes_map[nid] = GraphNode(
-                    id=nid,
-                    name=(doc.filename or "文档").rsplit(".", 1)[0][:30],
-                    type="概念",
-                    weight=min(doc.entity_count / 100.0, 1.0) if doc.entity_count else 0.5,
-                    color=TYPE_COLORS["概念"],
-                )
-                color_idx += 1
-                entity_types.add("概念")
+    for u, v, edge_data in G.edges(data=True):
+        links.append(GraphLink(
+            id=edge_data.get("edge_id", f"{u}-{v}"),
+            source=u,
+            target=v,
+            relation=edge_data.get("relation_type", "关联"),
+            value=edge_data.get("weight", 0.5),
+            sentence=edge_data.get("sentence", ""),
+            dashed=False,
+        ))
 
-    nodes = list(nodes_map.values())[:limit]
-
-    # 孤立节点桥接 — 将散落小分量连入核心网络
+    nodes = list(nodes_map.values())
+    # 孤立节点桥接
     nodes, links = _bridge_isolated_nodes(nodes, links)
-
     legend = get_legend(entity_types) if entity_types else {"概念": TYPE_COLORS["概念"]}
 
     if not nodes:
@@ -209,70 +205,116 @@ async def get_entity_detail(
     kb_id: str = Query(None, description="知识库ID"),
     db: AsyncSession = Depends(get_db),
 ):
-    """获取实体详情（含关联实体和来源文档）"""
-    query = select(Document).where(Document.graph_data.isnot(None))
+    """获取实体详情（含关联实体和来源文档）— v4.0: 从 GraphEntity/GraphRelation 独立表读取"""
+    from app.models.graph_entity import GraphEntity, GraphRelation
+    from app.services.graph_service import GraphService
+
+    # 从新表查询实体
+    entity_stmt = select(GraphEntity).where(GraphEntity.id == entity_id)
     if kb_id:
-        query = query.where(Document.kb_id == kb_id)
-    result = await db.execute(query)
-    docs = result.scalars().all()
+        entity_stmt = entity_stmt.where(GraphEntity.kb_id == kb_id)
+    entity_result = await db.execute(entity_stmt)
+    entity = entity_result.scalar_one_or_none()
 
-    all_links = []
-    all_nodes = {}
-    target_node = None
-
-    for doc in docs:
-        try:
-            stored = doc.graph_data  # v2.4: JSON 列自动反序列化
-            if not stored:
-                continue
-            for node in stored.get("nodes", []):
-                nid = node.get("id", "")
-                if nid and nid not in all_nodes:
-                    all_nodes[nid] = node
-                    if nid == entity_id:
-                        target_node = node
-            for link in stored.get("links", []):
-                all_links.append(link)
-        except (json.JSONDecodeError, TypeError):
-            continue
-
-    if not target_node:
+    if not entity:
         raise HTTPException(status_code=404, detail="实体不存在")
 
-    # 收集关联实体
-    related_entities = []
-    related_docs = [doc.filename for doc in docs if doc.filename]
-    seen_related = set()
+    # 查询关联关系
+    rel_stmt = select(GraphRelation).where(
+        or_(
+            GraphRelation.source_id == entity_id,
+            GraphRelation.target_id == entity_id,
+        )
+    )
+    if kb_id:
+        rel_stmt = rel_stmt.where(GraphRelation.kb_id == kb_id)
+    rel_result = await db.execute(rel_stmt)
+    relations = rel_result.scalars().all()
 
-    for link in all_links:
-        src = link.get("source", "")
-        tgt = link.get("target", "")
-        other_id = None
-        if src == entity_id:
-            other_id = tgt
-        elif tgt == entity_id:
-            other_id = src
-        if other_id and other_id in all_nodes and other_id not in seen_related:
-            other = all_nodes[other_id]
-            related_entities.append({
-                "id": other_id,
-                "name": other.get("name", other_id),
-                "type": other.get("type", "概念"),
-                "relation": link.get("relation", "关联"),
-                "color": other.get("color", get_color_for_type(other.get("type", "概念"), 0)),
-                "weight": other.get("weight", 0.5),
-            })
-            seen_related.add(other_id)
+    # 收集关联实体 ID
+    related_ids = set()
+    rel_map = {}  # neighbor_id -> relation_type
+    for r in relations:
+        neighbor_id = r.target_id if r.source_id == entity_id else r.source_id
+        related_ids.add(neighbor_id)
+        rel_map[neighbor_id] = r.relation_type
+
+    # 批量查询关联实体
+    related_entities = []
+    if related_ids:
+        neighbor_stmt = select(GraphEntity).where(GraphEntity.id.in_(related_ids))
+        neighbor_result = await db.execute(neighbor_stmt)
+        neighbors = {e.id: e for e in neighbor_result.scalars()}
+
+        for nid in related_ids:
+            if nid in neighbors:
+                n = neighbors[nid]
+                related_entities.append({
+                    "id": n.id,
+                    "name": n.name,
+                    "type": n.entity_type,
+                    "relation": rel_map.get(nid, "关联"),
+                    "color": n.color or get_color_for_type(n.entity_type, 0),
+                    "weight": n.weight or 0.5,
+                })
+
+    # 来源文档
+    source_doc_ids = []
+    if entity.source_doc_ids:
+        for s in entity.source_doc_ids:
+            if isinstance(s, dict) and s.get("doc_id"):
+                source_doc_ids.append(s["doc_id"])
+    if not source_doc_ids:
+        source_doc_ids.append("未知")
 
     return EntityDetail(
-        id=entity_id,
-        name=target_node.get("name", entity_id),
-        type=target_node.get("type", "概念"),
-        description=target_node.get("description", ""),
-        weight=target_node.get("weight", 0.5),
+        id=entity.id,
+        name=entity.name,
+        type=entity.entity_type,
+        description=entity.description or "",
+        weight=entity.weight or 0.5,
         related_entities=related_entities,
-        related_documents=related_docs,
+        related_documents=source_doc_ids,
     )
+
+
+def _build_graph_from_documents(docs: list, limit: int) -> GraphData:
+    """从旧 Document.graph_data JSON 构建图谱数据（向后兼容回退）"""
+    nodes_map = {}
+    links = []
+    color_idx = 0
+    entity_types = set()
+
+    for doc in docs:
+        if doc.graph_data:
+            try:
+                stored = doc.graph_data
+                for node in stored.get("nodes", []):
+                    nid = node.get("id", "")
+                    if nid and nid not in nodes_map:
+                        etype = node.get("type", "概念")
+                        color = get_color_for_type(etype, color_idx)
+                        nodes_map[nid] = GraphNode(
+                            id=nid, name=node.get("name", nid),
+                            type=etype, weight=node.get("weight", 0.5), color=color,
+                        )
+                        color_idx += 1
+                        entity_types.add(etype)
+                for link in stored.get("links", []):
+                    links.append(GraphLink(
+                        id=link.get("id", ""),
+                        source=link.get("source", ""), target=link.get("target", ""),
+                        relation=link.get("relation", "关联"),
+                        value=link.get("value", 0.5),
+                        sentence=link.get("sentence", ""),
+                        dashed=link.get("dashed", False),
+                    ))
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"解析文档图谱数据失败: {e}")
+
+    nodes = list(nodes_map.values())[:limit]
+    legend = get_legend(entity_types) if entity_types else {"概念": TYPE_COLORS["概念"]}
+    return GraphData(nodes=nodes, links=links[:limit], legend=legend)
 
 
 def _bridge_isolated_nodes(nodes: list, links: list) -> tuple:

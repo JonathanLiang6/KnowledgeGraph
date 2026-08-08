@@ -1,4 +1,4 @@
-# CLAUDE.md — KnowledgeGraph v3.0
+# CLAUDE.md — KnowledgeGraph v4.0
 
 > 智能教学知识图谱管理平台 · Claude Code 项目指南
 

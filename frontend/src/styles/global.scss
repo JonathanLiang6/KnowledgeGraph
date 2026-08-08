@@ -380,6 +380,12 @@ input, textarea, select {
   50% { opacity: 0; }
 }
 
+// 渐显下落（用于列表交错入场）
+@keyframes dropIn {
+  0% { opacity: 0; transform: translateY(-8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
 // ==========================================
 // 页面过渡
 // ==========================================
@@ -441,6 +447,16 @@ input, textarea, select {
 .gap-sm { gap: var(--spacing-sm); }
 .gap-md { gap: var(--spacing-md); }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+// ==========================================
+// 高级质感工具类
+// ==========================================
+
+// 字体显示反差
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: var(--tracking-tight);
+}
 
 // ==========================================
 // Element Plus 全局森林绿主题覆盖

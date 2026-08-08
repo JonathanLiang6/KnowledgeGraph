@@ -1,6 +1,6 @@
 """
 RAG 编排服务 - 串联 chunk → embed → hybrid search → rerank → build context
-v3.1 (Phase 1): GraphRAG 升级 — 使用 GraphRetriever 替代内存索引 + 全局搜索 + 查询路由
+v4.0 (Phase 1): GraphRAG 升级 — 使用 GraphRetriever 替代内存索引 + 全局搜索 + 查询路由
 """
 import asyncio
 import time
@@ -62,16 +62,19 @@ def classify_query_type(query: str) -> str:
     for kw in _FACTUAL_KEYWORDS:
         if kw in q_lower:
             return "factual"
-    # 默认: 短查询 → factual, 长查询 → summary
-    return "factual" if len(q_stripped) < 50 else "summary"
+    # v4.0: 默认一律使用 factual（局部检索），避免误分类
+    return "factual"
 
 
 # ── LRU 检索缓存（使用 cachetools.TTLCache）────────────────
+# v4.0: 增加知识库版本号用于缓存失效
 
 _search_cache: TTLCache = TTLCache(
     maxsize=config.SEARCH_CACHE_SIZE,
     ttl=config.SEARCH_CACHE_TTL,
 )
+# 每个 kb_id 的内容版本号，文档变更时递增
+_kb_content_versions: dict = {}
 
 
 # ── RAG 编排 ─────────────────────────────────────────────────
@@ -123,8 +126,9 @@ class RAGService:
             top_k: 返回结果数
             use_rerank: 是否启用重排序
         """
-        # 检查缓存
-        cache_key = f"{query}:{kb_id}:{top_k}:{use_rerank}"
+        # 检查缓存（v4.0: 加入知识库内容版本号，文档变更时缓存自动失效）
+        kb_version = _kb_content_versions.get(kb_id, 0) if kb_id else 0
+        cache_key = f"{query}:{kb_id}:{top_k}:{use_rerank}:v{kb_version}"
         cached = _search_cache.get(cache_key)
         if cached is not None:
             logger.debug(f"[RAG] 缓存命中: {query[:50]}...")
@@ -336,6 +340,12 @@ def _do_search(
     return results[:top_k]
 
 
+def invalidate_kb_cache(kb_id: str):
+    """文档变更时调用，递增知识库内容版本号使缓存失效"""
+    _kb_content_versions[kb_id] = _kb_content_versions.get(kb_id, 0) + 1
+    logger.debug(f"知识库 {kb_id} 缓存版本递增至 {_kb_content_versions[kb_id]}")
+
+
 async def _graph_enhanced_search_async(
     query: str,
     top_k: int,
@@ -370,18 +380,18 @@ async def _graph_enhanced_search_async(
     hybrid_results = _do_search(query, top_k, use_rerank)
 
     # 将图检索结果转换为 SearchResult 格式
+    # v4.0: 移除 RRF 融合前的权重预乘（RRF 基于排名而非原始分数，预乘无意义）
     graph_as_search = []
     for gr in graph_results:
         graph_as_search.append(SearchResult(
             chunk_id=f"graph:{gr.entity_id}",
             text=gr.context_text,
-            score=gr.score * config.GRAPH_RETRIEVAL_WEIGHT,
+            score=gr.score,
             source="graph_traversal",
         ))
 
-    # RRF 融合：混合检索 + 图检索
+    # RRF 融合：混合检索 + 图检索（rrf_fusion 已按 RRF 分数降序排列）
     merged = rrf_fusion([hybrid_results, graph_as_search], k=60)
-    merged.sort(key=lambda r: r.score, reverse=True)
 
     elapsed = (time.monotonic() - t0) * 1000
     logger.debug(

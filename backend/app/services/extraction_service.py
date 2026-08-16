@@ -1,6 +1,7 @@
 """
 实体提取编排服务 - 两阶段管道 + 动态图谱合并去噪
 """
+import asyncio
 import logging
 from typing import List, Dict, Optional
 from app.services.entity_extractor import NLPEntityExtractor
@@ -28,8 +29,10 @@ class ExtractionService:
         Returns:
             {"nodes": [...], "links": [...], "legend": {...}}
         """
-        # Stage 1: NLP 粗筛
-        entities, relationships, legend = self.nlp_extractor.extract(text)
+        # Stage 1: NLP 粗筛（v4.1: jieba/TF-IDF 同步计算移入线程池，避免阻塞事件循环）
+        entities, relationships, legend = await asyncio.get_running_loop().run_in_executor(
+            None, self.nlp_extractor.extract, text
+        )
         logger.info(f"Stage 1 (NLP): {len(entities)} 实体, {len(relationships)} 关系")
 
         # Stage 2: LLM 精炼（可选）

@@ -226,6 +226,7 @@ async def upload_document(
     db.add(doc)
     await db.flush()
     await db.refresh(doc)
+    await db.commit()  # v4.1: 先提交事务再启动后台任务，消除"任务读不到未提交状态"竞态
 
     # 触发异步处理
     from app.tasks.document_tasks import start_document_processing
@@ -274,6 +275,7 @@ async def batch_upload_documents(
     duplicates = 0
 
     for file in files:
+        stored_path = None
         try:
             raw_filename = file.filename or "untitled"
 
@@ -331,6 +333,7 @@ async def batch_upload_documents(
             db.add(doc)
             await db.flush()
             await db.refresh(doc)
+            await db.commit()  # v4.1: 先提交再启动任务，消除未提交状态竞态
 
             # 触发处理
             from app.tasks.document_tasks import start_document_processing
@@ -345,10 +348,27 @@ async def batch_upload_documents(
             ))
             succeeded += 1
 
-        except HTTPException:
-            raise  # FastAPI 异常直接传播
+        except HTTPException as e:
+            # v4.1: 单文件校验失败不中断整批 — 记录失败项并继续（清理已落盘文件）
+            logger.warning(f"批量上传跳过文件 [{file.filename}]: {e.detail}")
+            if stored_path and os.path.exists(stored_path):
+                try:
+                    os.remove(stored_path)
+                except OSError:
+                    pass
+            items.append(BatchUploadItem(
+                filename=file.filename or "unknown",
+                success=False,
+                message=str(e.detail),
+            ))
+            failed += 1
         except Exception as e:
             logger.error(f"批量上传失败 [{file.filename}]: {e}")
+            if stored_path and os.path.exists(stored_path):
+                try:
+                    os.remove(stored_path)
+                except OSError:
+                    pass
             items.append(BatchUploadItem(
                 filename=file.filename or "unknown",
                 success=False,
@@ -395,6 +415,7 @@ async def reprocess_document(
         doc.relationship_count = 0
         doc.chunk_count = 0
     await db.flush()
+    await db.commit()  # v4.1: 先提交再启动任务，消除未提交状态竞态
 
     # 触发处理
     from app.tasks.document_tasks import start_document_processing
@@ -483,10 +504,39 @@ async def delete_document(
     except Exception as e:
         logger.warning(f"清理检索索引失败（非致命）: {e}")
 
+    # v4.1: 清理该文档贡献的图谱数据（关系按来源删除；共享实体仅移除本来源记录）
+    try:
+        from app.models.graph_entity import GraphEntity, GraphRelation
+        from sqlalchemy import delete as sa_delete
+        await db.execute(sa_delete(GraphRelation).where(GraphRelation.source_doc_id == doc_id))
+        ent_result = await db.execute(select(GraphEntity).where(GraphEntity.kb_id == doc.kb_id))
+        for entity in ent_result.scalars():
+            sources = list(entity.source_doc_ids or [])
+            remaining = [s for s in sources if (s or {}).get("doc_id") != doc_id]
+            if len(remaining) == len(sources):
+                continue  # 该文档未贡献此实体
+            if remaining:
+                entity.source_doc_ids = remaining
+            else:
+                await db.delete(entity)
+        # 清理删除后度为 0 的孤立节点（内部会同步失效图谱缓存）
+        from app.services.graph_service import GraphService
+        await GraphService.clean_orphan_nodes(db, doc.kb_id)
+        logger.info(f"已清理文档图谱数据: {doc.id}")
+    except Exception as e:
+        logger.warning(f"清理图谱数据失败（非致命）: {e}")
+
     # v4.0: 使检索缓存失效，避免用户看到已删除文档的过时结果
     kb_id = doc.kb_id
     await db.delete(doc)
     await db.flush()
+
+    # v4.1: 清理文档的阶段产物
+    try:
+        from app.tasks.document_tasks import cleanup_doc_artifacts
+        cleanup_doc_artifacts(doc_id)
+    except Exception as e:
+        logger.warning(f"清理阶段产物失败（非致命）: {e}")
 
     try:
         from app.services.rag_service import invalidate_kb_cache

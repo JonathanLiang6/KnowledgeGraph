@@ -27,8 +27,24 @@ from app.services.memory_service import (
 
 logger = logging.getLogger(__name__)
 
-# Agent 最大推理步数（从配置读取）
-MAX_AGENT_STEPS = config.AGENT_MAX_STEPS
+# v4.1 (#81): 不再模块级固化 MAX_AGENT_STEPS — 各处运行时读取 config.AGENT_MAX_STEPS，
+# 保证配置修改后无需重启进程即可生效（热更新）
+
+
+def _truncate_observation(text: str, max_chars: int) -> str:
+    """
+    v4.1 (#56): 截断过长的 Observation，防止多步检索长文档后上下文爆炸。
+
+    超过 max_chars 时保留前 60% + 截断提示 + 后 40%，提示中标注省略的字符数。
+    max_chars 非正数时原样返回（视为不限制）。
+    """
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    keep_head = max_chars * 3 // 5   # 前 60%
+    keep_tail = max_chars - keep_head  # 后 40%
+    omitted = len(text) - keep_head - keep_tail
+    marker = f"\n...[Observation 已截断，共省略 {omitted} 字符]...\n"
+    return text[:keep_head] + marker + text[len(text) - keep_tail:]
 
 # ReAct System Prompt 模板（v3.2: 联网搜索 + 知识覆盖诊断）
 REACT_SYSTEM_PROMPT = """你是一个基于知识图谱的智能问答 Agent。你可以使用以下工具来查找回答问题所需的信息。
@@ -139,6 +155,9 @@ class ReActAgent:
         # v4.0: 延迟初始化会话记忆（首次运行）
         await self._ensure_memory()
 
+        # v4.1 (#81): 每次运行时从配置读取最大步数（热更新），单次运行内保持一致
+        max_steps = config.AGENT_MAX_STEPS
+
         yield {"type": "agent/thought", "content": f"开始分析问题: {user_query[:100]}..."}
 
         tools_desc = get_tools_description(enable_web=self.enable_web)
@@ -149,7 +168,7 @@ class ReActAgent:
         def _build_system_prompt() -> str:
             return REACT_SYSTEM_PROMPT.format(
                 tools_description=tools_desc,
-                max_steps=MAX_AGENT_STEPS,
+                max_steps=max_steps,
                 episodic_memory=episodic_context or "无历史对话",
                 user_query=user_query,
                 web_search_rules=web_search_rules,
@@ -159,9 +178,12 @@ class ReActAgent:
             {"role": "system", "content": _build_system_prompt()},
         ]
 
+        # v4.1 (#82): 标记 LLM 调用是否失败 — 失败后短路返回，不再触发额外的总结 LLM 调用
+        llm_failed = False
+
         # Step 循环
-        for step_num in range(1, MAX_AGENT_STEPS + 1):
-            yield {"type": "agent/thought", "content": f"推理步骤 {step_num}/{MAX_AGENT_STEPS}..."}
+        for step_num in range(1, max_steps + 1):
+            yield {"type": "agent/thought", "content": f"推理步骤 {step_num}/{max_steps}..."}
 
             # 调用 LLM
             try:
@@ -174,6 +196,7 @@ class ReActAgent:
             except Exception as e:
                 logger.error(f"Agent LLM 调用失败 step={step_num}: {e}")
                 yield {"type": "agent/error", "content": f"LLM调用失败: {e}"}
+                llm_failed = True
                 break
 
             # 解析响应
@@ -216,7 +239,7 @@ class ReActAgent:
                     "role": "user",
                     "content": f"Observation: {observation}\n\n"
                                f"请继续推理。如果信息充分，请给出 Final Answer。"
-                               f"剩余步数: {MAX_AGENT_STEPS - step_num}",
+                               f"剩余步数: {max_steps - step_num}",
                 })
             else:
                 # 没有解析到有效 action，可能是 LLM 直接回答了
@@ -226,10 +249,15 @@ class ReActAgent:
                 yield {"type": "agent/done"}
                 return
 
+        # v4.1 (#82): LLM 调用失败 — 短路返回，不再触发"达到最大步数"的额外总结 LLM 调用
+        if llm_failed:
+            yield {"type": "agent/done"}
+            return
+
         # 达到最大步数，强制生成答案（v4.0: 记录到工作记忆）
-        logger.info(f"Agent 达到最大步数 {MAX_AGENT_STEPS}，强制生成最终答案")
+        logger.info(f"Agent 达到最大步数 {max_steps}，强制生成最终答案")
         self.working_memory.add_step(AgentStep(
-            step_num=MAX_AGENT_STEPS + 1,
+            step_num=max_steps + 1,
             thought="达到最大推理步数，综合已有信息生成回答",
             action="generate_summary",
             action_input="综合所有 Observation",
@@ -240,7 +268,7 @@ class ReActAgent:
             summary_messages = messages + [{
                 "role": "user",
                 "content": (
-                    f"你已经完成了 {MAX_AGENT_STEPS} 步推理。请基于以上所有 Observation "
+                    f"你已经完成了 {max_steps} 步推理。请基于以上所有 Observation "
                     f"综合出一个完整回答。问题: {user_query}"
                 ),
             }]
@@ -270,14 +298,28 @@ class ReActAgent:
             kwargs.update(self._parse_tool_input(tool_name, tool_input))
 
             result = await tool_info["function"](**kwargs)
-            return str(result)
+            # v4.1 (#56): 截断过长 Observation，防止上下文爆炸
+            return _truncate_observation(str(result), config.AGENT_OBSERVATION_MAX_CHARS)
         except Exception as e:
             logger.error(f"工具 {tool_name} 执行失败: {e}")
             return f"工具执行出错: {e}"
 
+    # v4.1 (#82): 严格 key=value 模式 — key 为字母/数字/中文/下划线/连字符（不含空格），
+    # value 不含逗号和等号，逗号分隔（允许逗号前后空白），整体不允许有多余裸文本。
+    _KV_KEY = r"[A-Za-z0-9_\-\u4e00-\u9fff]+"
+    _STRICT_KV_RE = re.compile(rf"^{_KV_KEY}=[^,=]+(?:\s*,\s*{_KV_KEY}=[^,=]+)*$")
+
     def _parse_tool_input(self, tool_name: str, tool_input: str) -> dict:
-        """解析工具输入参数"""
-        kwargs = {}
+        """
+        解析工具输入参数。
+
+        优先级:
+        1. JSON 对象 → 直接返回
+        2. 严格匹配 "key=value[,key=value]*" → 按 key=value 拆分
+        3. 其余（含 "=" 的自然语言，如 "什么是 a=b"）→ 整体作为第一个位置参数
+        """
+        if tool_input is None:
+            tool_input = ""
 
         # 尝试 JSON 解析
         try:
@@ -289,19 +331,22 @@ class ReActAgent:
 
         # 对于非 JSON 输入，直接作为第一个参数
         param_keys = list(TOOL_REGISTRY[tool_name]["parameters"].keys())
-        if param_keys:
-            first_param = param_keys[0]
-            # 尝试解析 "key=value" 格式
-            if "=" in tool_input:
-                for part in tool_input.split(","):
-                    part = part.strip()
-                    if "=" in part:
-                        k, v = part.split("=", 1)
-                        kwargs[k.strip()] = v.strip().strip("\"'")
-            else:
-                kwargs[first_param] = tool_input.strip().strip("\"'")
+        if not param_keys:
+            return {}
 
-        return kwargs
+        first_param = param_keys[0]
+        text = tool_input.strip().strip("\"'")
+
+        # 仅当整体严格匹配 key=value 列表时才拆 kv；否则视为自然语言查询
+        # （fullmatch 避免 $ 匹配尾部换行导致的误判）
+        if text and self._STRICT_KV_RE.fullmatch(text):
+            kwargs = {}
+            for part in text.split(","):
+                k, v = part.split("=", 1)
+                kwargs[k.strip()] = v.strip().strip("\"'")
+            return kwargs
+
+        return {first_param: text}
 
     def _parse_react_output(self, content: str) -> dict:
         """

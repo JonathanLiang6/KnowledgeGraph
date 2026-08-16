@@ -155,6 +155,8 @@ class Config:
     AGENT_TEMPERATURE: float = _safe_float("AGENT_TEMPERATURE", "0.3")
     AGENT_MAX_TOKENS: int = _safe_int("AGENT_MAX_TOKENS", "2048")
     AGENT_MEMORY_MAX_TURNS: int = _safe_int("AGENT_MEMORY_MAX_TURNS", "5")
+    # v4.1 (#56): 单次工具 Observation 的最大字符数，超出按 60%/40% 保留首尾并截断中段
+    AGENT_OBSERVATION_MAX_CHARS: int = _safe_int("AGENT_OBSERVATION_MAX_CHARS", "2000")
 
     # ========================
     # 数据配置

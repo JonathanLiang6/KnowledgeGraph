@@ -5,17 +5,46 @@
 - 置信度打分
 """
 import logging
+import difflib
 from typing import List, Dict, Optional
+from app.core.config import config
 from app.services.deepseek_client import DeepSeekClient
 
 logger = logging.getLogger(__name__)
 
 
+def _bigrams(s: str) -> set:
+    """返回字符串的字符 bigram 集合（长度 < 2 时为空集）"""
+    return {s[i:i + 2] for i in range(len(s) - 1)} if len(s) >= 2 else set()
+
+
+def compute_name_similarity(a: str, b: str) -> float:
+    """
+    v4.1 (#57): 计算两个实体名称的混合相似度（模块级纯函数，便于测试）。
+
+    取两者的最大值:
+    - 字符 bigram Jaccard: 对中文友好（"机器学习" vs "机器学习算法" 共享 "机器/器学/学习"）
+    - difflib.SequenceMatcher.ratio(): 对编辑距离敏感（增删字符的小改动）
+
+    返回 [0, 1]；任一为空字符串时返回 0（无有效字符可比）。
+    """
+    if not a or not b:
+        return 0.0
+    a_bi, b_bi = _bigrams(a), _bigrams(b)
+    if a_bi or b_bi:
+        union = a_bi | b_bi
+        bigram_jaccard = len(a_bi & b_bi) / len(union) if union else 0.0
+    else:
+        bigram_jaccard = 0.0
+    ratio = difflib.SequenceMatcher(None, a, b).ratio()
+    return max(bigram_jaccard, ratio)
+
+
 class LLMEntityRefiner:
     """使用 DeepSeek V4 对 NLP 粗筛结果进行精炼"""
 
-    # v4.0: 模糊匹配阈值 — LLM 返回的实体名与 NLP 候选名相似度 >= 此值时视为同一实体
-    FUZZY_MATCH_THRESHOLD = 0.75
+    # v4.1 (#57): 模糊匹配阈值改为运行时读取全局配置（默认 0.85），
+    # 与 GraphRAG 实体消歧共用 GRAPH_ENTITY_RESOLUTION_THRESHOLD，删除硬编码 0.75
 
     @classmethod
     async def refine(
@@ -61,25 +90,24 @@ class LLMEntityRefiner:
     @classmethod
     def _find_best_match(cls, name: str, candidates: dict, threshold: float = None) -> Optional[str]:
         """
-        v4.0: 模糊匹配实体名。先精确匹配，再使用 Jaccard 相似度模糊匹配。
+        v4.0: 模糊匹配实体名。先精确匹配，再使用混合相似度模糊匹配。
         解决 LLM 微调实体名（如 "机器学习"→"机器学习算法"）后的对不齐问题。
+
+        v4.1 (#57): 相似度改用 compute_name_similarity（bigram Jaccard + SequenceMatcher），
+        阈值运行时读取 config.GRAPH_ENTITY_RESOLUTION_THRESHOLD（默认 0.85）。
         """
         if threshold is None:
-            threshold = cls.FUZZY_MATCH_THRESHOLD
+            threshold = config.GRAPH_ENTITY_RESOLUTION_THRESHOLD
 
         # 精确匹配
         if name in candidates:
             return name
 
-        # 模糊匹配：Jaccard 字符级相似度
-        name_chars = set(name)
+        # 模糊匹配：混合相似度（对中文与编辑距离均友好）
         best_key = None
         best_sim = 0.0
         for key in candidates:
-            key_chars = set(key)
-            intersection = name_chars & key_chars
-            union = name_chars | key_chars
-            sim = len(intersection) / len(union) if union else 0
+            sim = compute_name_similarity(name, key)
             if sim > best_sim and sim >= threshold:
                 best_sim = sim
                 best_key = key

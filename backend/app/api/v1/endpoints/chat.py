@@ -47,7 +47,8 @@ async def list_models():
     }
 
 
-@router.get("/agent/clear")
+# v4.1 (#83): 改为 POST — 清除记忆是有副作用的操作，不应由 GET（可被预取/爬虫误触发）执行
+@router.post("/agent/clear")
 async def clear_agent_memory(
     kb_id: str = Query("__global__", description="知识库ID（v3.2: kb_id 隔离）"),
     session_id: str = Query("default", description="会话ID"),
@@ -96,9 +97,16 @@ async def chat_completions(
             )
             user_query = _get_user_query(request.messages)
             full_answer = ""
+            agent_error = None
             async for event in agent.run(user_query):
                 if event["type"] == "agent/answer":
                     full_answer = event["content"]
+                elif event["type"] == "agent/error":
+                    agent_error = event.get("content", "")
+            # v4.1 (#82): Agent/LLM 失败时返回 502，而非 200 空答案
+            if not full_answer:
+                logger.error(f"非流式 Agent 未产生回答: kb_id={request.kb_id}, error={agent_error}")
+                raise HTTPException(status_code=502, detail="Agent 推理失败，请稍后重试")
             return ChatResponse(
                 id=chat_id,
                 created=int(time.time()),
@@ -133,11 +141,16 @@ async def chat_completions(
             },
         )
     else:
-        result = await DeepSeekClient.chat(
-            messages=messages,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-        )
+        # v4.1 (#82): LLM 调用失败返回 502 并记录异常详情，而非抛出未处理异常
+        try:
+            result = await DeepSeekClient.chat(
+                messages=messages,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+            )
+        except Exception:
+            logger.exception("非流式 LLM 调用失败")
+            raise HTTPException(status_code=502, detail="LLM 服务调用失败，请稍后重试")
 
         return ChatResponse(
             id=chat_id,
@@ -177,9 +190,10 @@ async def _stream_response(chat_id: str, model: str, messages: List[dict],
         yield f"data: {json.dumps({'id': chat_id, 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
         yield "data: [DONE]\n\n"
 
-    except Exception as e:
-        logger.error(f"流式响应错误: {e}")
-        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    except Exception:
+        # v4.1 (#83): 不向客户端泄露异常原文，详情记录到服务端日志
+        logger.exception("流式响应错误")
+        yield f"data: {json.dumps({'error': '服务处理异常，请稍后重试'})}\n\n"
         yield "data: [DONE]\n\n"
 
 
@@ -260,9 +274,10 @@ async def _stream_agent_response(
         yield f"data: {json.dumps(done_chunk)}\n\n"
         yield "data: [DONE]\n\n"
 
-    except Exception as e:
-        logger.error(f"Agent SSE 响应错误: {e}")
-        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    except Exception:
+        # v4.1 (#83): 不向客户端泄露异常原文，详情记录到服务端日志
+        logger.exception("Agent SSE 响应错误")
+        yield f"data: {json.dumps({'error': '服务处理异常，请稍后重试'})}\n\n"
         yield "data: [DONE]\n\n"
 
 

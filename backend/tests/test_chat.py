@@ -39,8 +39,8 @@ async def test_chat_completion_with_kb(async_client):
 
 @pytest.mark.anyio
 async def test_agent_clear_memory(async_client):
-    """清除 Agent 会话记忆"""
-    response = await async_client.get("/api/v1/chat/agent/clear?session_id=test-session-123")
+    """清除 Agent 会话记忆（v4.1 #83: 改为 POST）"""
+    response = await async_client.post("/api/v1/chat/agent/clear?session_id=test-session-123")
     assert response.status_code == 200
     data = response.json()
     assert data.get("status") == "ok"

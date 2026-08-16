@@ -93,7 +93,11 @@
               v-for="rn in relatedNodes"
               :key="rn.id"
               class="related-item clickable"
+              role="button"
+              tabindex="0"
+              aria-label="跳转到关联实体"
               @click="navigateToEntity(rn)"
+              @keydown.enter.prevent="navigateToEntity(rn)"
             >
               <span class="related-dot" :style="{ background: rn.color }" />
               <span class="related-name">{{ rn.name }}</span>
@@ -113,9 +117,9 @@
 import { ref, computed, watch, onMounted, onUnmounted, markRaw, reactive } from 'vue'
 import { useRoute } from 'vue-router'
 import { useGraphRenderer } from '../composables/useGraphRenderer'
-import { getGraphData, getEntityDetail } from '../api/graph'
+import { getGraphData } from '../api/graph'
 import { ElMessage } from 'element-plus'
-import { Minus, Plus, ArrowRight } from '@element-plus/icons-vue'
+import { ArrowRight } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const canvasRef = ref(null)
@@ -242,7 +246,15 @@ async function refreshData() {
   }
 }
 
-function resetView() { refreshData() }
+function resetView() {
+  // v4.1 (#74): 本地重置视角 — 重新过滤并以当前数据重启布局，
+  // 不再走网络重新拉全图（旧实现 limit:200 重拉会截断大图并重建渲染器）
+  hiddenTypes.clear()
+  if (renderer) {
+    renderer.setHiddenTypes([])
+    renderer.resize(graphWidth.value, graphHeight.value)
+  }
+}
 
 function updateSize() {
     const container = canvasRef.value?.parentElement

@@ -7,11 +7,9 @@
 与 hybrid_search.py 配合使用：图检索结果通过 RRF 与向量/BM25 结果融合。
 """
 import logging
-from typing import List, Optional, Set, Tuple
 from dataclasses import dataclass, field
-from collections import deque
 
-from sqlalchemy import select, and_, or_, func
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import config
@@ -55,8 +53,8 @@ class GraphRetrievalResult:
     entity_name: str
     entity_type: str
     score: float                          # 相关性分数
-    traversal_path: List[str] = field(default_factory=list)      # 路径上的实体ID序列
-    path_relations: List[str] = field(default_factory=list)       # 路径上的关系类型
+    traversal_path: list[str] = field(default_factory=list)      # 路径上的实体ID序列
+    path_relations: list[str] = field(default_factory=list)       # 路径上的关系类型
     context_text: str = ""                 # 格式化后的文本上下文
     description: str = ""                  # 实体描述
 
@@ -82,7 +80,7 @@ class GraphRetriever:
         kb_id: str,
         db: AsyncSession,
         top_k: int = 5,
-    ) -> List[GraphRetrievalResult]:
+    ) -> list[GraphRetrievalResult]:
         """
         主检索入口：从查询出发在图谱中检索相关信息。
 
@@ -126,7 +124,7 @@ class GraphRetriever:
 
     async def _locate_seed_entities(
         self, query: str, kb_id: str, db: AsyncSession
-    ) -> List[GraphEntity]:
+    ) -> list[GraphEntity]:
         """
         从查询中提取关键词，在 graph_entities 中匹配种子实体。
 
@@ -142,8 +140,8 @@ class GraphRetriever:
             return []
 
         # 对每个关键词做 DB 查询
-        all_matches: List[Tuple[GraphEntity, float]] = []
-        seen_ids: Set[str] = set()
+        all_matches: list[tuple[GraphEntity, float]] = []
+        seen_ids: set[str] = set()
 
         for kw in keywords:
             # 先精确匹配
@@ -168,10 +166,7 @@ class GraphRetriever:
             for entity in like_result.scalars():
                 if entity.id not in seen_ids:
                     # 前缀匹配比子串匹配得分更高
-                    if entity.name.startswith(kw):
-                        score = 0.8 * (entity.weight or 0.5)
-                    else:
-                        score = 0.5 * (entity.weight or 0.5)
+                    score = (0.8 if entity.name.startswith(kw) else 0.5) * (entity.weight or 0.5)
                     all_matches.append((entity, score))
                     seen_ids.add(entity.id)
 
@@ -184,10 +179,10 @@ class GraphRetriever:
     def _build_results(
         self,
         G,
-        seed_entities: List[GraphEntity],
+        seed_entities: list[GraphEntity],
         traversal: dict,
         query: str,
-    ) -> List[GraphRetrievalResult]:
+    ) -> list[GraphRetrievalResult]:
         """将遍历结果构建为 GraphRetrievalResult 列表"""
         results = []
         seed_ids = {e.id for e in seed_entities}
@@ -264,8 +259,8 @@ class GraphRetriever:
         return "\n".join(lines)
 
     def _extract_path_relations(
-        self, G, path: List[str]
-    ) -> List[str]:
+        self, G, path: list[str]
+    ) -> list[str]:
         """提取路径上的关系类型序列"""
         relations = []
         for i in range(len(path) - 1):
@@ -289,6 +284,6 @@ class GraphRetriever:
         kb_id: str,
         db: AsyncSession,
         hops: int = 1,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """获取实体及其邻居上下文（用于 API）"""
         return await GraphService.get_neighbors(db, entity_id, kb_id, hops)

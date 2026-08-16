@@ -4,9 +4,9 @@
 - 三元组验证 (Entity-Relation-Entity)
 - 置信度打分
 """
-import logging
 import difflib
-from typing import List, Dict, Optional
+import logging
+
 from app.core.config import config
 from app.services.deepseek_client import DeepSeekClient
 
@@ -50,7 +50,7 @@ class LLMEntityRefiner:
     async def refine(
         cls,
         text: str,
-        candidates: List[dict],
+        candidates: list[dict],
         max_candidates: int = 30,
     ) -> dict:
         """
@@ -64,9 +64,6 @@ class LLMEntityRefiner:
         Returns:
             {"entities": [...], "relationships": [...]}
         """
-        # 构建候选实体文本
-        candidate_text = cls._format_candidates(candidates[:max_candidates])
-
         result = await DeepSeekClient.extract_entities(
             text=text,
             candidate_entities=candidates[:max_candidates],
@@ -77,7 +74,7 @@ class LLMEntityRefiner:
         return merged
 
     @classmethod
-    def _format_candidates(cls, candidates: List[dict]) -> str:
+    def _format_candidates(cls, candidates: list[dict]) -> str:
         """格式化候选实体列表"""
         lines = []
         for ent in candidates:
@@ -88,7 +85,7 @@ class LLMEntityRefiner:
         return '\n'.join(lines)
 
     @classmethod
-    def _find_best_match(cls, name: str, candidates: dict, threshold: float = None) -> Optional[str]:
+    def _find_best_match(cls, name: str, candidates: dict, threshold: float = None) -> str | None:
         """
         v4.0: 模糊匹配实体名。先精确匹配，再使用混合相似度模糊匹配。
         解决 LLM 微调实体名（如 "机器学习"→"机器学习算法"）后的对不齐问题。
@@ -114,7 +111,7 @@ class LLMEntityRefiner:
         return best_key
 
     @classmethod
-    def _merge_results(cls, nlp_candidates: List[dict], llm_result: dict) -> dict:
+    def _merge_results(cls, nlp_candidates: list[dict], llm_result: dict) -> dict:
         """
         合并 NLP 粗筛和 LLM 精炼结果：
         - LLM 确认的实体保留并更新描述和置信度
@@ -133,7 +130,7 @@ class LLMEntityRefiner:
         for ent in nlp_candidates:
             name = ent["name"]
             # v4.0: 先精确再模糊匹配
-            matched_name = cls._find_best_match(name, {n: True for n in llm_names})
+            matched_name = cls._find_best_match(name, dict.fromkeys(llm_names, True))
             if matched_name:
                 # LLM 确认：更新
                 llm_ent = next(e for e in llm_entities if e.get("name") == matched_name)
@@ -160,7 +157,7 @@ class LLMEntityRefiner:
             if name in used_llm_names:
                 continue
             # v4.0: 检查是否与已有实体模糊匹配（LLM 改名的情况）
-            matched_existing = cls._find_best_match(name, {n: True for n in merged_entities})
+            matched_existing = cls._find_best_match(name, dict.fromkeys(merged_entities, True))
             if matched_existing:
                 # LLM 改名了但 NLP 有类似实体：合并描述
                 existing = merged_entities[matched_existing]

@@ -4,19 +4,24 @@
 个人知识库拓扑启动台 CRUD 端点。
 三层结构：根节点 → 分支节点 → 知识库节点。
 """
-import os
 import logging
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models.topology import TopologyNode, TopologyEdge
-from app.models.knowledge_base import KnowledgeBase
 from app.models.document import Document
+from app.models.knowledge_base import KnowledgeBase
+from app.models.topology import TopologyEdge, TopologyNode
 from app.schemas.topology import (
-    TopologyNodeCreate, TopologyNodeUpdate, TopologyNodeOut,
-    TopologyEdgeCreate, TopologyEdgeOut, TopologyData,
+    TopologyData,
+    TopologyEdgeCreate,
+    TopologyEdgeOut,
+    TopologyNodeCreate,
+    TopologyNodeOut,
+    TopologyNodeUpdate,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,7 +77,7 @@ async def create_topology_node(
 ):
     """创建拓扑节点（知识库入口或文件夹）。首个节点自动成为根节点。"""
     # 检查是否已存在根节点
-    root_stmt = select(TopologyNode).where(TopologyNode.is_root == True)
+    root_stmt = select(TopologyNode).where(TopologyNode.is_root.is_(True))
     root_result = await db.execute(root_stmt)
     root = root_result.scalar_one_or_none()
 

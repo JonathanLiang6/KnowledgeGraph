@@ -5,14 +5,13 @@
 当本地知识库检索结果不足或用户询问时效性内容时自动触发。
 """
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 async def web_search(
     db=None,
-    kb_id: Optional[str] = None,
+    kb_id: str | None = None,
     query: str = "",
     max_results: int = 3,
     **kwargs,

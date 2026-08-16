@@ -1,19 +1,21 @@
 """
 知识库管理 API - CRUD 操作
 """
-import os
 import logging
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+
 from app.core.database import get_db
-from app.models.knowledge_base import KnowledgeBase
 from app.models.document import Document
+from app.models.knowledge_base import KnowledgeBase
 from app.schemas.knowledge_base import (
     KnowledgeBaseCreate,
-    KnowledgeBaseUpdate,
-    KnowledgeBaseResponse,
     KnowledgeBaseListResponse,
+    KnowledgeBaseResponse,
+    KnowledgeBaseUpdate,
 )
 
 logger = logging.getLogger(__name__)
@@ -154,7 +156,7 @@ async def delete_knowledge_base(
 
     # 删除关联的拓扑节点（如果存在）
     try:
-        from app.models.topology import TopologyNode, TopologyEdge
+        from app.models.topology import TopologyEdge, TopologyNode
         node_stmt = select(TopologyNode).where(TopologyNode.kb_id == kb_id)
         node_result = await db.execute(node_stmt)
         node = node_result.scalar_one_or_none()
@@ -173,8 +175,9 @@ async def delete_knowledge_base(
 
     # v4.1: 显式清理图谱数据（SQLite 未启用 PRAGMA foreign_keys，FK CASCADE 不生效）
     try:
-        from app.models.graph_entity import GraphEntity, GraphRelation
         from sqlalchemy import delete as sa_delete
+
+        from app.models.graph_entity import GraphEntity, GraphRelation
         await db.execute(sa_delete(GraphRelation).where(GraphRelation.kb_id == kb_id))
         await db.execute(sa_delete(GraphEntity).where(GraphEntity.kb_id == kb_id))
         logger.info(f"已清理知识库图谱数据: {kb_id}")

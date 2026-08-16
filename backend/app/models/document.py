@@ -1,16 +1,17 @@
 """
 文档模型
 """
-import uuid
 import enum
-from typing import Optional
+import uuid
 from datetime import datetime
-from sqlalchemy import String, Text, Integer, Float, DateTime, Enum, ForeignKey, func, JSON
+
+from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.core.database import Base
 
 
-class DocumentStatus(str, enum.Enum):
+class DocumentStatus(str, enum.Enum):  # noqa: UP042 — SQLAlchemy 列依赖 str+Enum 双继承行为
     """文档处理状态"""
     PENDING = "pending"
     PARSING = "parsing"
@@ -41,7 +42,7 @@ class Document(Base):
     file_path: Mapped[str] = mapped_column(String(1000), nullable=False, comment="存储路径")
     file_type: Mapped[str] = mapped_column(String(20), default="unknown", comment="文件类型")
     file_size: Mapped[int] = mapped_column(Integer, default=0, comment="文件大小(字节)")
-    file_hash: Mapped[Optional[str]] = mapped_column(
+    file_hash: Mapped[str | None] = mapped_column(
         String(64), nullable=True, default=None, index=True, comment="文件SHA256哈希"
     )
 
@@ -62,7 +63,7 @@ class Document(Base):
     error_message: Mapped[str] = mapped_column(Text, default="", comment="错误信息")
 
     # 图谱数据 (v2.4: JSON 类型替代 Text, 自动序列化)
-    graph_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=None, comment="提取的图谱数据JSON")
+    graph_data: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None, comment="提取的图谱数据JSON")
 
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(

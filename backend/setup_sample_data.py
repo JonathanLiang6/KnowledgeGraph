@@ -5,13 +5,14 @@ v3.2 示例数据生成脚本
 import asyncio
 import os
 import sys
+
 sys.path.insert(0, os.path.dirname(__file__))
+
+from sqlalchemy import select
 
 from app.core.database import async_session_factory, init_db
 from app.models.knowledge_base import KnowledgeBase
-from app.models.topology import TopologyNode, TopologyEdge
-from sqlalchemy import select
-
+from app.models.topology import TopologyEdge, TopologyNode
 
 MARKDOWN_DOCS = {
     "化学": [
@@ -545,7 +546,7 @@ async def setup_sample_data():
 
     async with async_session_factory() as session:
         # 1. 检查是否已有根节点
-        root_stmt = select(TopologyNode).where(TopologyNode.is_root == True)
+        root_stmt = select(TopologyNode).where(TopologyNode.is_root.is_(True))
         root_result = await session.execute(root_stmt)
         root = root_result.scalar_one_or_none()
 
@@ -602,7 +603,7 @@ async def setup_sample_data():
                 edge = TopologyEdge(source_id=root.id, target_id=node.id)
                 session.add(edge)
                 await session.commit()
-                print(f"   📎 拓扑节点已创建并连接到根节点")
+                print("   📎 拓扑节点已创建并连接到根节点")
 
         # 4. 创建 Markdown 文档文件
         inputs_dir = os.path.join(os.path.dirname(__file__), "inputs", "files")
@@ -618,10 +619,10 @@ async def setup_sample_data():
                     f.write(doc["content"])
             print(f"📄 {kb_name}: {len(docs)} 个文档已写入 {kb_dir}")
 
-    print(f"\n🎉 示例数据创建完成！")
-    print(f"   4 个知识库已就绪")
+    print("\n🎉 示例数据创建完成！")
+    print("   4 个知识库已就绪")
     print(f"   共 {sum(len(docs) for docs in MARKDOWN_DOCS.values())} 个 Markdown 文档")
-    print(f"\n请重启后端服务以处理文档，或通过前端上传。")
+    print("\n请重启后端服务以处理文档，或通过前端上传。")
 
 
 if __name__ == "__main__":

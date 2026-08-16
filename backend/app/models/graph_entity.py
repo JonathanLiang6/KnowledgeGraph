@@ -6,10 +6,11 @@
 """
 import uuid
 from datetime import datetime
-from typing import Optional, List
-from sqlalchemy import String, Text, Float, DateTime, ForeignKey, Integer, func
+
+from sqlalchemy import DateTime, Float, ForeignKey, String, Text, func
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.core.database import Base
 
 
@@ -41,11 +42,11 @@ class GraphEntity(Base):
         String(20), default="#4F8CF7", comment="前端显示颜色"
     )
     # 来源追踪：记录实体来自哪些文档及片段
-    source_doc_ids: Mapped[Optional[dict]] = mapped_column(
+    source_doc_ids: Mapped[dict | None] = mapped_column(
         JSON, nullable=True, default=None,
         comment="来源文档列表 [{\"doc_id\": \"...\", \"sentence\": \"...\"}]"
     )
-    properties: Mapped[Optional[dict]] = mapped_column(
+    properties: Mapped[dict | None] = mapped_column(
         JSON, nullable=True, default=None, comment="扩展属性 (JSON)"
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -101,7 +102,7 @@ class GraphRelation(Base):
     sentence: Mapped[str] = mapped_column(
         Text, default="", comment="关系来源句子"
     )
-    source_doc_id: Mapped[Optional[str]] = mapped_column(
+    source_doc_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True, default=None, comment="来源文档ID"
     )
     created_at: Mapped[datetime] = mapped_column(

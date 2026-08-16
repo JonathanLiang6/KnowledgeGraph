@@ -1,9 +1,8 @@
 """测试工具函数"""
-import pytest
 from app.utils.helpers import (
+    calculate_similarity,
     compute_file_hash,
     count_tokens_approximate,
-    calculate_similarity,
 )
 
 

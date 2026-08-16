@@ -9,14 +9,13 @@
 - 读取路径: load_networkx() → NetworkX 内存图（模块级 LRU 缓存）
 - 算法: Louvain 社区检测、BFS/DFS 遍历、最短路径
 """
-import logging
 import asyncio
+import logging
 from collections import defaultdict, deque
-from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass, field
 
 import networkx as nx
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import config
@@ -28,14 +27,14 @@ logger = logging.getLogger(__name__)
 # 模块级 NetworkX 缓存
 # ============================================================
 # key: kb_id, value: (nx.DiGraph, version_counter)
-_nx_cache: Dict[str, Tuple[nx.DiGraph, int]] = {}
+_nx_cache: dict[str, tuple[nx.DiGraph, int]] = {}
 _nx_cache_lock = asyncio.Lock()
 # 每个 kb_id 的版本号，写操作时递增
-_kb_versions: Dict[str, int] = defaultdict(int)
+_kb_versions: dict[str, int] = defaultdict(int)
 # 每个 kb_id 的写锁，防止并发写入产生重复实体
-_kb_write_locks: Dict[str, asyncio.Lock] = {}
+_kb_write_locks: dict[str, asyncio.Lock] = {}
 # v4.0: 社区检测结果缓存，随图版本失效
-_community_cache: Dict[str, Tuple[List[dict], int]] = {}
+_community_cache: dict[str, tuple[list[dict], int]] = {}
 
 
 async def _get_kb_write_lock(kb_id: str) -> asyncio.Lock:
@@ -55,9 +54,9 @@ class CommunityInfo:
     """社区信息"""
     id: str
     label: str = ""
-    node_ids: List[str] = field(default_factory=list)
+    node_ids: list[str] = field(default_factory=list)
     node_count: int = 0
-    top_entities: List[dict] = field(default_factory=list)
+    top_entities: list[dict] = field(default_factory=list)
     description: str = ""
 
 
@@ -75,10 +74,10 @@ class GraphService:
         cls,
         db: AsyncSession,
         kb_id: str,
-        nodes: List[dict],
-        links: List[dict],
+        nodes: list[dict],
+        links: list[dict],
         doc_id: str,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """
         从提取结果构建/更新图谱。
 
@@ -98,7 +97,7 @@ class GraphService:
         async with lock:
             # v4.0: 仅预取本次涉及名称的已有实体（避免全量加载大型知识库）
             incoming_names = list({(n.get("name") or "").strip() for n in nodes if (n.get("name") or "").strip()})
-            existing_entities: Dict[Tuple[str, str], GraphEntity] = {}
+            existing_entities: dict[tuple[str, str], GraphEntity] = {}
             if incoming_names:
                 name_stmt = select(GraphEntity).where(
                     and_(GraphEntity.kb_id == kb_id, GraphEntity.name.in_(incoming_names))
@@ -109,7 +108,7 @@ class GraphService:
                     existing_entities[key] = e
 
             # Step 1: 实体对齐与持久化
-            node_id_map: Dict[str, str] = {}  # 原始 node_id -> 数据库 entity.id
+            node_id_map: dict[str, str] = {}  # 原始 node_id -> 数据库 entity.id
             for node in nodes:
                 entity_id, is_new = await cls._resolve_entity(
                     db, kb_id, node, doc_id, existing_entities
@@ -153,8 +152,8 @@ class GraphService:
         kb_id: str,
         node: dict,
         doc_id: str,
-        existing_entities: Dict[Tuple[str, str], GraphEntity] = None,
-    ) -> Tuple[str, bool]:
+        existing_entities: dict[tuple[str, str], GraphEntity] = None,
+    ) -> tuple[str, bool]:
         """
         实体对齐：同名同类型同KB → 合并；否则新建。
 
@@ -352,7 +351,7 @@ class GraphService:
     def traverse_graph(
         cls,
         G: nx.DiGraph,
-        seed_ids: List[str],
+        seed_ids: list[str],
         max_hops: int = None,
         max_nodes: int = None,
     ) -> dict:
@@ -378,7 +377,7 @@ class GraphService:
             max_nodes = config.GRAPH_TRAVERSAL_MAX_NODES
 
         visited: set = set()
-        edges: List[Tuple[str, str, dict]] = []
+        edges: list[tuple[str, str, dict]] = []
         paths: dict = {}  # entity_id -> path from nearest seed
         queue = deque()
 
@@ -420,9 +419,9 @@ class GraphService:
         cls,
         db: AsyncSession,
         entity_id: str,
-        kb_id: Optional[str] = None,
+        kb_id: str | None = None,
         hops: int = 1,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """
         获取实体的邻居子图（BFS 展开）。
 
@@ -494,7 +493,7 @@ class GraphService:
     @classmethod
     async def _get_neighbors_from_db(
         cls, db: AsyncSession, entity_id: str, hops: int = 1
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """退化方案：直接从 DB 查询实体及其邻居"""
         stmt = select(GraphEntity).where(GraphEntity.id == entity_id)
         result = await db.execute(stmt)
@@ -572,7 +571,7 @@ class GraphService:
         target_id: str,
         kb_id: str,
         max_hops: int = 3,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """查询两个实体之间的所有路径（最多 max_hops 跳）"""
         G = await cls.load_networkx(db, kb_id)
         if source_id not in G or target_id not in G:
@@ -604,7 +603,7 @@ class GraphService:
                         "length": len(path) - 1,
                         "total_weight": round(total_weight, 4),
                     })
-                    enumerated += 1
+                    enumerated += 1  # noqa: SIM113 — 熔断计数器，非索引用途
                     if enumerated >= MAX_ENUM_PATHS:
                         logger.warning(
                             f"find_paths 枚举达到 {MAX_ENUM_PATHS} 条上限，提前截断 "
@@ -628,8 +627,8 @@ class GraphService:
         cls,
         db: AsyncSession,
         kb_id: str,
-        min_size: Optional[int] = None,
-    ) -> List[dict]:
+        min_size: int | None = None,
+    ) -> list[dict]:
         """
         Louvain 社区检测（v4.0: 带 NetworkX 缓存，随图版本失效）。
 
@@ -667,7 +666,7 @@ class GraphService:
                     partition[node] = i
 
         # 按社区分组
-        communities: Dict[int, List[str]] = defaultdict(list)
+        communities: dict[int, list[str]] = defaultdict(list)
         for node_id, comm_id in partition.items():
             communities[comm_id].append(node_id)
 
@@ -720,7 +719,7 @@ class GraphService:
         db: AsyncSession,
         community_id: str,
         kb_id: str,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """获取单个社区的详细信息"""
         communities = await cls.detect_communities(db, kb_id)
         for comm in communities:
@@ -783,7 +782,7 @@ class GraphService:
     async def get_graph_stats(
         cls,
         db: AsyncSession,
-        kb_id: Optional[str] = None,
+        kb_id: str | None = None,
     ) -> dict:
         """获取图谱统计信息"""
         # DB 聚合查询
@@ -870,7 +869,7 @@ class GraphService:
         cls,
         db: AsyncSession,
         kb_id: str,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """
         删除无法建立任何链接的孤立节点（包括弱链接）。
 
@@ -881,7 +880,8 @@ class GraphService:
         Returns:
             {"deleted": int} — 已删除的孤立节点数
         """
-        from sqlalchemy import delete as sql_delete, and_
+        from sqlalchemy import and_
+        from sqlalchemy import delete as sql_delete
 
         # 查找所有在该 KB 中有关系的实体 ID
         rel_source_stmt = select(GraphRelation.source_id).where(
@@ -934,7 +934,7 @@ class GraphService:
         cls,
         db: AsyncSession,
         kb_id: str,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """
         从现有 document.graph_data JSON 迁移到 GraphEntity/GraphRelation 表。
 

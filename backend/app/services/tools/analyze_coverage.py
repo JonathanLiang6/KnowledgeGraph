@@ -5,14 +5,13 @@ Agent 调用此工具时，自动分析当前知识库的实体覆盖情况，
 识别强项和薄弱领域，生成覆盖诊断报告。
 """
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 async def analyze_coverage(
     db=None,
-    kb_id: Optional[str] = None,
+    kb_id: str | None = None,
     **kwargs,
 ) -> str:
     """

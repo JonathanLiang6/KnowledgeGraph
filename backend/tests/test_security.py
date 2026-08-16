@@ -21,8 +21,8 @@ def _client():
 
 async def test_auth_disabled_allows_all():
     """API_AUTH_TOKEN 为空 = 认证关闭，所有请求放行"""
+
     import app.core.security as sec
-    from fastapi import Request
 
     # 直接验证纯逻辑
     assert sec.auth_middleware_check(None, "") is None  # type: ignore[arg-type]

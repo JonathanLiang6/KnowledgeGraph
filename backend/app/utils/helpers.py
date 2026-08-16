@@ -2,12 +2,11 @@
 通用工具函数 - 文件安全、流式 I/O、格式化
 """
 import hashlib
-import re
-import os
-import time
 import logging
+import os
+import re
+import time
 from pathlib import Path
-from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +80,7 @@ def detect_mime_type(filepath: str) -> str:
 
 
 def validate_file_allowed(filepath: str, original_filename: str,
-                          detected_mime: str = None) -> Tuple[bool, str]:
+                          detected_mime: str = None) -> tuple[bool, str]:
     """
     校验文件是否在允许列表中。
 

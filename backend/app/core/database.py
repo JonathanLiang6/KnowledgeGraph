@@ -2,11 +2,13 @@
 数据库配置 - SQLAlchemy async engine + session factory
 v2.1: 连接池配置、Alembic 迁移支持
 """
-import os
 import logging
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+import os
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import StaticPool
+
 from app.core.config import config
 
 logger = logging.getLogger(__name__)
@@ -67,11 +69,6 @@ class Base(DeclarativeBase):
 
 
 # 确保所有模型在 create_all 前被导入（字符串关系依赖）
-import app.models.knowledge_base  # noqa: E402
-import app.models.document  # noqa: E402
-import app.models.system_setting  # noqa: E402
-import app.models.graph_entity  # noqa: E402  # Phase 1: GraphRAG
-import app.models.topology  # noqa: E402  # v3.2: Q10 拓扑导航
 
 
 async def get_db() -> AsyncSession:
@@ -136,3 +133,11 @@ async def init_db():
 async def close_db():
     """关闭数据库连接"""
     await engine.dispose()
+
+
+# 确保所有模型在 create_all 前被导入（字符串关系依赖）— 副作用导入，不可被 lint 自动移除
+import app.models.document  # noqa: E402, F401
+import app.models.graph_entity  # noqa: E402, F401  # Phase 1: GraphRAG
+import app.models.knowledge_base  # noqa: E402, F401
+import app.models.system_setting  # noqa: E402, F401
+import app.models.topology  # noqa: E402, F401  # v3.2: Q10 拓扑导航

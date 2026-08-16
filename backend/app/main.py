@@ -1,17 +1,19 @@
 """
 FastAPI 应用入口 - v4.0 智能教学知识图谱管理平台
 """
-import logging
 import asyncio
+import logging
 import os
-import uuid
 import time
+import uuid
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from app.core.config import config, APP_VERSION
-from app.core.database import init_db, close_db
+
 from app.api.v1.router import api_router
+from app.core.config import APP_VERSION, config
+from app.core.database import close_db, init_db
 
 # 配置日志（v4.1: LOG_LEVEL 白名单校验，非法值回退 INFO 而非启动崩溃）
 _valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
@@ -62,10 +64,11 @@ async def lifespan(app: FastAPI):
 
     # v3.2: 清理孤立节点 — 删除无法建立任何链接的实体
     try:
+        from sqlalchemy import select as sa_select
+
         from app.core.database import async_session_factory
         from app.models.knowledge_base import KnowledgeBase
         from app.services.graph_service import GraphService
-        from sqlalchemy import select as sa_select
 
         async with async_session_factory() as session:
             kb_result = await session.execute(sa_select(KnowledgeBase.id))
@@ -82,11 +85,12 @@ async def lifespan(app: FastAPI):
 
     # Phase 1: 图谱数据迁移 — 将现有 document.graph_data JSON → GraphEntity/GraphRelation 表
     try:
+        from sqlalchemy import func, select
+
         from app.core.database import async_session_factory
         from app.models.document import Document, DocumentStatus
         from app.models.graph_entity import GraphEntity
         from app.services.graph_service import GraphService
-        from sqlalchemy import select, func
 
         async with async_session_factory() as session:
             # 检查是否需要迁移
@@ -108,7 +112,7 @@ async def lifespan(app: FastAPI):
                 migrated = 0
                 for doc in docs:
                     try:
-                        stats = await GraphService.build_graph(
+                        await GraphService.build_graph(
                             db=session,
                             kb_id=doc.kb_id,
                             nodes=doc.graph_data.get("nodes", []),
@@ -127,7 +131,6 @@ async def lifespan(app: FastAPI):
     # P1: 恢复中断的文档处理任务 (v2.5: 存储 task 句柄以便关闭时取消)
     app.state._resume_task = None
     try:
-        from app.tasks.document_tasks import resume_pending_documents
         # 延迟恢复（等待其他服务初始化完成）
         app.state._resume_task = asyncio.create_task(_delayed_resume())
     except Exception as e:

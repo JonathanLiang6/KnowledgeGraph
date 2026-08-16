@@ -7,9 +7,11 @@ v2.4: 智能重试(仅可恢复错误) + asyncio 顶层导入
 import asyncio
 import json
 import logging
-from typing import Optional, AsyncGenerator, List, Dict, Any
+from typing import AsyncGenerator
+
 import httpx
 from openai import AsyncOpenAI
+
 from app.core.config import config
 
 logger = logging.getLogger(__name__)
@@ -36,9 +38,9 @@ class DeepSeekClient:
     @classmethod
     async def chat(
         cls,
-        messages: List[Dict[str, str]],
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
+        messages: list[dict[str, str]],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
         stream: bool = False,
     ) -> dict:
         """
@@ -85,9 +87,9 @@ class DeepSeekClient:
     @classmethod
     async def chat_stream(
         cls,
-        messages: List[Dict[str, str]],
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
+        messages: list[dict[str, str]],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         调用 DeepSeek V4 Chat Completions（流式 SSE）
@@ -126,7 +128,7 @@ class DeepSeekClient:
                     await asyncio.sleep(2 ** attempt)
 
     @classmethod
-    async def rewrite_query(cls, query: str, num_versions: int = 2) -> List[str]:
+    async def rewrite_query(cls, query: str, num_versions: int = 2) -> list[str]:
         """
         使用 LLM 对查询进行多角度改写，用于提升检索召回率。
 
@@ -182,7 +184,7 @@ class DeepSeekClient:
     async def extract_entities(
         cls,
         text: str,
-        candidate_entities: Optional[List[dict]] = None,
+        candidate_entities: list[dict] | None = None,
     ) -> dict:
         """
         使用 DeepSeek V4 进行实体精炼提取
@@ -305,7 +307,5 @@ def _is_retryable_error(e: Exception) -> bool:
     if status is not None:
         return status >= 500 or status == 429
     # 排除确定性的客户端错误（ValueError/TypeError等不应重试）
-    if isinstance(e, (ValueError, TypeError, AttributeError, KeyError)):
-        return False
-    # 网络/连接错误可重试
-    return True
+    # 确定性错误不重试，网络/连接错误可重试
+    return not isinstance(e, (ValueError, TypeError, AttributeError, KeyError))

@@ -4,7 +4,8 @@
 提供知识库实体覆盖分析接口，供前端 ECharts Treemap 渲染。
 """
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db

@@ -3,19 +3,19 @@
 """
 import asyncio
 import json
+import logging
 import time
 import uuid
-import logging
-from typing import List, AsyncGenerator
+from typing import AsyncGenerator
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.core.database import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import config
+from app.core.database import get_db
 from app.models.document import Document, DocumentStatus
-from app.services.deepseek_client import DeepSeekClient
-from app.services.char_stream import char_stream
 from app.schemas.chat import (
     ChatRequest,
     ChatResponse,
@@ -23,6 +23,8 @@ from app.schemas.chat import (
     ChatUsage,
     Message,
 )
+from app.services.char_stream import char_stream
+from app.services.deepseek_client import DeepSeekClient
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["智能问答"])
@@ -148,9 +150,9 @@ async def chat_completions(
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
             )
-        except Exception:
+        except Exception as e:
             logger.exception("非流式 LLM 调用失败")
-            raise HTTPException(status_code=502, detail="LLM 服务调用失败，请稍后重试")
+            raise HTTPException(status_code=502, detail="LLM 服务调用失败，请稍后重试") from e
 
         return ChatResponse(
             id=chat_id,
@@ -167,7 +169,7 @@ async def chat_completions(
         )
 
 
-async def _stream_response(chat_id: str, model: str, messages: List[dict],
+async def _stream_response(chat_id: str, model: str, messages: list[dict],
                          temperature: float = None, max_tokens: int = None):
     """SSE 流式响应生成器"""
     try:
@@ -197,7 +199,7 @@ async def _stream_response(chat_id: str, model: str, messages: List[dict],
         yield "data: [DONE]\n\n"
 
 
-def _get_user_query(messages: List[Message]) -> str:
+def _get_user_query(messages: list[Message]) -> str:
     """从消息列表中提取最后的用户消息"""
     for msg in reversed(messages):
         if msg.role == "user":
@@ -219,8 +221,8 @@ async def _stream_agent_response(
     - agent/answer: 最终答案
     - agent/error: 错误信息
     """
-    from app.services.agent_service import ReActAgent
     from app.core.database import async_session_factory
+    from app.services.agent_service import ReActAgent
 
     user_query = _get_user_query(request.messages)
     session_id = getattr(request, 'session_id', 'default')
@@ -289,11 +291,11 @@ async def _char_by_char(text: str):
 
 
 async def _build_rag_messages(
-    messages: List[Message],
+    messages: list[Message],
     kb_id: str,
     model: str,
     db: AsyncSession,
-) -> List[dict]:
+) -> list[dict]:
     """
     构建 RAG 增强的消息列表 (v2.3: 实现真正的混合检索上下文)。
 

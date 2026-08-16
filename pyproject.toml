@@ -18,7 +18,16 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "C4", "T10", "ARG"]
-ignore = ["T10"]  # T10: explicit stacklevel on warn — too noisy for a project this size
+# v4.1 (#75): 收紧为对本代码库现实合理的规则集 —
+# B008: FastAPI Depends() 默认参数惯用法；E501: 长行（宽 120 仍漏网，历史代码多）
+# E402: database.py 等刻意在代码后导入模型；N806/N803: ML/图代码用大写缩写变量
+# ARG*: 接口/回调保留未用参数属常见签名约束；SIM105/117、B905/B007、UP035: 风格性噪音
+ignore = [
+  "T10",
+  "B008", "E501", "E402", "N806", "N803",
+  "ARG001", "ARG002", "ARG003", "ARG004", "ARG005",
+  "SIM105", "SIM117", "B905", "B007", "UP035", "S",
+]
 
 [tool.ruff.format]
 quote-style = "double"

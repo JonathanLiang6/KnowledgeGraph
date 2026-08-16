@@ -6,9 +6,10 @@ topology_edges: 拓扑边（星型结构：根节点 ↔ 子节点）
 """
 import uuid
 from datetime import datetime
-from typing import Optional
-from sqlalchemy import String, Float, Boolean, DateTime, ForeignKey, func
+
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column
+
 from app.core.database import Base
 
 
@@ -29,7 +30,7 @@ class TopologyNode(Base):
     icon: Mapped[str] = mapped_column(
         String(10), default="📁", comment="Emoji 图标"
     )
-    kb_id: Mapped[Optional[str]] = mapped_column(
+    kb_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("knowledge_bases.id", ondelete="SET NULL"),
         nullable=True, default=None, comment="绑定的知识库ID（可空）"
     )

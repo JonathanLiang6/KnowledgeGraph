@@ -1,5 +1,6 @@
 """图谱遍历工具"""
 import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -23,9 +24,10 @@ async def graph_traverse(
     Returns:
         格式化的遍历结果文本
     """
+    from sqlalchemy import select
+
     from app.models.graph_entity import GraphEntity
     from app.services.graph_service import GraphService
-    from sqlalchemy import select
 
     # 1. 定位起始实体（v4.0: 精确匹配优先，避免模糊匹配返回无关实体）
     stmt = select(GraphEntity).where(

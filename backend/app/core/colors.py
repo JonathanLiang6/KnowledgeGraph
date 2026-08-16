@@ -113,8 +113,13 @@ FALLBACK_COLORS: list[str] = [
 
 
 def _get_fallback_color(entity_type: str) -> str:
-    """基于实体类型名称的确定性哈希 fallback 颜色。保证同类型始终同色。"""
-    idx = hash(entity_type) % len(FALLBACK_COLORS)
+    """基于实体类型名称的确定性哈希 fallback 颜色。保证同类型始终同色。
+
+    v4.1 (#84): 改用 zlib.crc32 — 内置 hash() 受 PYTHONHASHSEED 影响，
+    跨进程不稳定，重启后同一类型会漂移到不同颜色。
+    """
+    import zlib
+    idx = zlib.crc32(entity_type.encode("utf-8")) % len(FALLBACK_COLORS)
     return FALLBACK_COLORS[idx]
 
 

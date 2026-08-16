@@ -20,13 +20,27 @@ _is_sqlite = "sqlite" in config.DATABASE_URL
 
 # 创建异步引擎（P2: 连接池配置）
 if _is_sqlite:
-    engine = create_async_engine(
-        config.DATABASE_URL,
-        echo=False,
-        future=True,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    if ":memory:" in config.DATABASE_URL:
+        # 内存库必须共享单连接
+        engine = create_async_engine(
+            config.DATABASE_URL,
+            echo=False,
+            future=True,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    else:
+        # v4.1 (#54): 文件型 SQLite 弃用 StaticPool — 单连接共享导致事务跨请求
+        # 交叠、并发回滚互相干扰；NullPool 每次取新连接，写锁由 SQLite 串行化，
+        # timeout=30 缓解 "database is locked"
+        from sqlalchemy.pool import NullPool
+        engine = create_async_engine(
+            config.DATABASE_URL,
+            echo=False,
+            future=True,
+            connect_args={"check_same_thread": False, "timeout": 30},
+            poolclass=NullPool,
+        )
 else:
     # PostgreSQL/MySQL 连接池配置
     engine = create_async_engine(

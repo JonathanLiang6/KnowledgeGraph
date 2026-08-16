@@ -13,12 +13,18 @@ from app.core.config import config, APP_VERSION
 from app.core.database import init_db, close_db
 from app.api.v1.router import api_router
 
-# 配置日志
+# 配置日志（v4.1: LOG_LEVEL 白名单校验，非法值回退 INFO 而非启动崩溃）
+_valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+_level_name = str(config.LOG_LEVEL).upper()
+if _level_name not in _valid_levels:
+    _level_name = "INFO"
 logging.basicConfig(
-    level=getattr(logging, config.LOG_LEVEL),
+    level=getattr(logging, _level_name),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+if _level_name != str(config.LOG_LEVEL).upper():
+    logger.warning(f"LOG_LEVEL={config.LOG_LEVEL!r} 非法，已回退为 INFO")
 
 
 @asynccontextmanager

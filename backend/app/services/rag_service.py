@@ -132,7 +132,10 @@ class RAGService:
         cached = _search_cache.get(cache_key)
         if cached is not None:
             logger.debug(f"[RAG] 缓存命中: {query[:50]}...")
-            return cached  # type: ignore[return-value]
+            # v4.1 (#59): 返回深拷贝 — 缓存对象跨请求共享时，调用方/融合逻辑
+            # 对 score 的就地修改会污染其他请求的缓存结果
+            import copy
+            return copy.deepcopy(cached)
 
         t_start = time.monotonic()
 

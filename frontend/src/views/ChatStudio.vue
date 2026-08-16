@@ -442,6 +442,8 @@ async function sendMessage() {
     if (m === liveMsg) continue  // v4.1: 代理比较恒成立，正确排除占位消息
     chatMessages.push({ role: m.role, content: m.content })
   }
+  // v4.1 (#83): 后端限制单次请求最多 50 条消息，超出时保留最近的上下文
+  if (chatMessages.length > 50) chatMessages.splice(0, chatMessages.length - 50)
 
   streamController = chatCompletionsStream(
     {

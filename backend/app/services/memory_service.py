@@ -46,7 +46,8 @@ class WorkingMemory:
         self.final_answer: str = ""
         self._scratchpad: List[str] = []
         # v4.0: 从配置读取最大步数，确保与 Agent 配置同步
-        self.max_steps = max(config.AGENT_MAX_STEPS, 10)
+        # v4.1 (#81): 移除强制下限 10 — 直接使用配置值，与 Agent 循环步数保持一致
+        self.max_steps = config.AGENT_MAX_STEPS
 
     def add_step(self, step: AgentStep):
         """记录一个推理步骤"""

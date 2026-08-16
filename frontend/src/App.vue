@@ -42,13 +42,21 @@ function blendColor(hex, weight) {
 }
 
 /**
- * easeOutExpo — 快速展开，尾部缓慢收敛（优化版）
- * 前50%快速覆盖，后50%缓慢收敛，更丝滑
+ * v4.2: 连续的展开缓动 — easeOutQuart 主曲线 + 前 10% 软启动。
+ * 修复旧版分段指数曲线在 t=0.4 处的不连续跳变（半径会突然回缩），
+ * 单条幂曲线全程连续可导，展开"一气呵成"。
  */
-function easeOutExpo(t) {
+function easeExpand(t) {
   if (t >= 1) return 1
-  // 调整为前40%快速，后60%缓慢收敛
-  return t < 0.4 ? Math.pow(2, 10 * t - 4) : 1 - Math.pow(2, -10 * (t - 0.4) / 0.6) * 0.3
+  const easeOutQuart = 1 - Math.pow(1 - t, 4)
+  const softStart = Math.min(1, t / 0.1)   // 前 10% 从静止平滑拉起，避免瞬间满速的生硬感
+  return easeOutQuart * (0.72 + 0.28 * softStart)
+}
+
+/** smoothstep — S 形平滑过渡（用于透明度等） */
+function smoothstep(t) {
+  const x = Math.min(Math.max(t, 0), 1)
+  return x * x * (3 - 2 * x)
 }
 
 /**
@@ -87,55 +95,36 @@ function startNodeExpand(x, y, color) {
   }
   transitionAnim.visible = true
 
-  const duration = 1400 // 总时长 ms（从1080ms增加到1400ms，更慢更丝滑）
+  const duration = 950 // v4.2: 1400 → 950ms，利落不拖沓
   const startTime = performance.now()
+  // 软化边缘宽度：随展开推进收窄（起笔 90px 光晕边 → 末段 24px），圆洞边缘柔和
+  const featherStart = 90, featherEnd = 24
 
   function animate(now) {
     const elapsed = now - startTime
     const rawT = Math.min(elapsed / duration, 1)
 
-    // ── 半径：easeOutExpo 驱动，快速弹开 ──
-    // 用 easeOutExpo 让前 40% 时间覆盖大部分屏幕
-    const t = easeOutExpo(rawT)
+    // ── 半径：连续缓动驱动 ──
+    const t = easeExpand(rawT)
     const radius = maxR * t
 
-    // ── mask：圆洞扩大，自然被视口裁剪 ──
-    const mask = buildMask(x, y, radius)
+    // ── mask：圆洞扩大 + 羽化边缘（不再是生硬的圆弧切割）──
+    const feather = featherStart + (featherEnd - featherStart) * smoothstep(rawT)
+    const mask = buildMask(x, y, radius, feather)
 
-    // ── opacity：分三段淡出（优化版，过渡更平滑）─
-    // 0-30%:  1（完全不透明，遮罩完全覆盖旧页面）
-    // 30-70%: 1 → 0.25（KB 页面开始"透过"遮罩显现）
-    // 70-100%: 0.25 → 0（遮罩完全消失，KB 页面清晰可见）
-    let opacity
-    if (rawT <= 0.30) {
-      opacity = 1
-    } else if (rawT <= 0.70) {
-      const segT = (rawT - 0.30) / 0.40
-      opacity = 1 - 0.75 * segT * segT // 二次缓入，更平滑
-    } else {
-      const segT = (rawT - 0.70) / 0.30
-      opacity = 0.25 * (1 - segT)
-    }
+    // ── opacity：单一 smoothstep 曲线（22% 后开始平滑淡出，替代旧三段折线）──
+    const opacity = 1 - smoothstep((rawT - 0.22) / 0.78)
 
-    // ── backdrop-filter blur：中间段最模糊（优化版）─
-    // 0-25%: 0
-    // 25-55%: 0 → 7px
-    // 55-85%: 7 → 12px（"打开"的景深最大）
-    // 85-100%: 12 → 0（KB 页面恢复清晰）
-    let blur
-    if (rawT <= 0.25) {
-      blur = 0
-    } else if (rawT <= 0.55) {
-      blur = 7 * ((rawT - 0.25) / 0.30)
-    } else if (rawT <= 0.85) {
-      blur = 7 + 5 * ((rawT - 0.55) / 0.30)
-    } else {
-      blur = 12 * (1 - (rawT - 0.85) / 0.15)
-    }
+    // ── blur：正弦单峰（中段景深最大，起止为 0，全程连续，替代旧四段折线）──
+    const blur = 11 * Math.sin(Math.PI * Math.min(rawT / 0.94, 1))
+
+    // ── 中心辉光：前 220ms 轻微增亮（"点亮"节点的瞬间反馈）后随整体淡出 ──
+    const glowBoost = rawT < 0.23 ? smoothstep(rawT / 0.23) * 0.5 : 0
 
     transitionAnim.overlayStyle = {
       '--node-color': nodeColor,
       '--glow-color': glowColor,
+      '--glow-boost': String(glowBoost),
       '--cx': x + 'px',
       '--cy': y + 'px',
       maskImage: mask,
@@ -161,9 +150,14 @@ function startNodeExpand(x, y, color) {
  * @param {number} cy - 圆心 Y（px，相对于视口）
  * @param {number} r  - 圆洞半径（px）
  */
-function buildMask(cx, cy, r) {
+function buildMask(cx, cy, r, feather = 40) {
+  // v4.2: 洞边缘加羽化渐变带（transparent → black 平滑过渡），
+  // 展开边缘呈柔和光晕而非生硬圆弧
   const clampedR = Math.max(0, r)
-  return `radial-gradient(circle ${clampedR.toFixed(1)}px at ${cx.toFixed(1)}px ${cy.toFixed(1)}px, transparent 0px, transparent ${clampedR.toFixed(1)}px, rgba(0,0,0,1) ${clampedR.toFixed(1)}px)`
+  const inner = clampedR
+  const outer = clampedR + feather
+  const mid = inner + feather * 0.45
+  return `radial-gradient(circle at ${cx.toFixed(1)}px ${cy.toFixed(1)}px, transparent 0px, transparent ${inner.toFixed(1)}px, rgba(0,0,0,0.4) ${mid.toFixed(1)}px, rgba(0,0,0,1) ${outer.toFixed(1)}px)`
 }
 
 function hideNodeExpand() {
@@ -217,12 +211,18 @@ provide('pageTransition', { startNodeExpand, hideNodeExpand })
   inset: 0;
   z-index: 9999;
   pointer-events: none;
-  background: radial-gradient(
-    circle at var(--cx) var(--cy),
-    var(--glow-color) 0%,
-    var(--node-color) 40%,
-    var(--node-color) 100%
-  );
+  background:
+    radial-gradient(
+      circle at var(--cx) var(--cy),
+      rgba(255, 255, 255, calc(var(--glow-boost, 0) * 0.22)) 0%,
+      transparent 18%
+    ),
+    radial-gradient(
+      circle at var(--cx) var(--cy),
+      var(--glow-color) 0%,
+      var(--node-color) 40%,
+      var(--node-color) 100%
+    );
   will-change: mask-image, opacity, backdrop-filter;
 }
 </style>

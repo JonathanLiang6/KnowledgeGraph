@@ -24,6 +24,22 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src')
     }
   },
+  // v4.1 (#87): vendor 分包 — 框架/图表/Markdown 库各自独立 chunk，
+  // 业务代码迭代不会使这些长缓存资源失效，二次访问命中浏览器缓存
+  build: {
+    rollupOptions: {
+      output: {
+        // 注：element-plus 不做统一分组 — 按需引入下各页面只携带所需组件，
+        // 统一分组会把全量组件打到首屏（实测 888KB）
+        manualChunks: {
+          vue: ['vue', 'vue-router'],
+          d3: ['d3'],
+          echarts: ['echarts'],
+          markdown: ['marked', 'dompurify'],
+        },
+      },
+    },
+  },
   server: {
     port: 3000,
     proxy: {

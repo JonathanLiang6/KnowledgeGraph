@@ -26,11 +26,13 @@ const props = defineProps({
   }
 })
 
+// v4.1 (#87): 小尺寸自动切换 sm 变体（20KB 级），避免侧栏 44px 图标加载 440KB+ 大图
 const src = computed(() => {
+  const small = Number(props.size) <= 160
   if (props.variant === 'green') {
-    return '/brain-green.png'
+    return small ? '/brain-green-sm.png' : '/brain-green.png'
   }
-  return '/brain.png'
+  return small ? '/brain-sm.png' : '/brain.png'
 })
 
 const style = computed(() => {

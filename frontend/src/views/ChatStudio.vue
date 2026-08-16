@@ -72,9 +72,18 @@
           <p>基于知识库内容，提供精准的教学问答服务</p>
         </div>
 
+        <!-- v4.1 (#87): 长会话分页渲染 — 先渲最近 50 条，更早的按需展开，降低长会话 DOM 压力 -->
+        <button
+          v-if="visibleCount < messages.length"
+          class="load-earlier-btn"
+          @click="visibleCount += VISIBLE_PAGE_SIZE"
+        >
+          加载更早的 {{ Math.min(VISIBLE_PAGE_SIZE, messages.length - visibleCount) }} 条消息（共 {{ messages.length }} 条）
+        </button>
+
         <!-- 消息列表 -->
         <div
-          v-for="(msg, idx) in messages"
+          v-for="(msg, idx) in visibleMessages"
           :key="msg.id"
           :class="['message', msg.role]"
         >
@@ -116,7 +125,7 @@
 
         <!-- 流式等待指示（收到首字节前显示，之后由打字机光标接管） -->
         <div
-          v-if="isStreaming && messages.length > 0 && !messages[messages.length - 1].content"
+          v-if="isStreaming && visibleMessages.length > 0 && !visibleMessages[visibleMessages.length - 1].content"
           class="streaming-indicator"
         >
           <div class="streaming-dots">
@@ -166,7 +175,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { chatCompletionsStream } from '../api/chat'
 import { Cpu, User, Plus, Promotion, Close, WarningFilled, ChatDotRound } from '@element-plus/icons-vue'
@@ -179,6 +188,10 @@ const inputRef = ref(null)
 const messagesContainer = ref(null)
 
 const messages = ref([])
+const VISIBLE_PAGE_SIZE = 50
+const visibleCount = ref(VISIBLE_PAGE_SIZE)
+// 分页视图：始终包含最新的消息；渲染函数中 idx 相对可见列表计算
+const visibleMessages = computed(() => messages.value.slice(-visibleCount.value))
 const inputText = ref('')
 const isStreaming = ref(false)
 const useAgent = ref(false)       // v3.2: Agent vs 知识库问答 切换
@@ -404,6 +417,7 @@ function loadMessages() {
     if (raw) messages.value = JSON.parse(raw)
     msgIdCounter = messages.value.length
   } catch { messages.value = [] }
+  visibleCount.value = VISIBLE_PAGE_SIZE  // v4.1 (#87): 会话切换重置分页
   historyMdCache.clear()  // v4.1 (#68): 历史消息缓存随会话切换失效
 }
 
@@ -425,6 +439,9 @@ async function sendMessage() {
     inputRef.value.style.height = 'auto'
   }
   scrollToBottom()
+
+  // v4.1 (#87): 新消息发送时收起历史分页，聚焦当前对话
+  if (visibleCount.value < VISIBLE_PAGE_SIZE) visibleCount.value = VISIBLE_PAGE_SIZE
 
   // 创建 assistant 占位
   const assistantId = genId()
@@ -1063,3 +1080,23 @@ onBeforeUnmount(() => {
   .msg-body { max-width: 85%; }
 }
 </style>
+
+/* v4.1 (#87): 加载更早消息 — 低调胶囊按钮 */
+.load-earlier-btn {
+  grid-column: 1 / -1;
+  justify-self: center;
+  margin: 4px auto 12px;
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+  background: rgba(46, 125, 80, 0.08);
+  border: 1px solid rgba(46, 125, 80, 0.25);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.load-earlier-btn:hover {
+  color: #2e7d50;
+  background: rgba(46, 125, 80, 0.15);
+  border-color: rgba(46, 125, 80, 0.45);
+}

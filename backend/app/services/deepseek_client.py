@@ -99,6 +99,7 @@ class DeepSeekClient:
 
         async with _API_SEMAPHORE:
             for attempt in range(cls.MAX_RETRIES):
+                produced = False
                 try:
                     stream = await client.chat.completions.create(
                         model=cls.CHAT_MODEL,
@@ -109,9 +110,15 @@ class DeepSeekClient:
                     )
                     async for chunk in stream:
                         if chunk.choices and chunk.choices[0].delta.content:
+                            produced = True
                             yield chunk.choices[0].delta.content
                     return
                 except Exception as e:
+                    # v4.1 (#50): 已产出内容后中途失败不再整段重试 — 否则已推送
+                    # 给前端的内容会再次出现，造成流式回答重复/错乱
+                    if produced:
+                        logger.error(f"DeepSeek Stream 中途失败且已产出内容，终止流: {e}")
+                        raise
                     logger.warning(f"DeepSeek Stream 调用失败 (尝试 {attempt + 1}/{cls.MAX_RETRIES}): {e}")
                     if attempt == cls.MAX_RETRIES - 1 or not _is_retryable_error(e):
                         raise

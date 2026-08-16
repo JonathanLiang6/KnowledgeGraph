@@ -280,6 +280,8 @@ class GraphService:
                 cached_graph, cached_version = _nx_cache[kb_id]
                 if cached_version == _kb_versions.get(kb_id, 0):
                     return cached_graph
+            # v4.1 (#52): 记录读取前版本号，写回时校验未被并发失效
+            read_version = _kb_versions.get(kb_id, 0)
 
         # 加载实体
         stmt = select(GraphEntity).where(GraphEntity.kb_id == kb_id)
@@ -313,8 +315,12 @@ class GraphService:
                 )
 
         async with _nx_cache_lock:
-            version = _kb_versions.get(kb_id, 0)
-            _nx_cache[kb_id] = (G, version)
+            # v4.1 (#52): DB 读取期间版本已变（图被并发更新/失效）→ 本次快照过期，
+            # 不写回缓存，避免旧图以新版本号写入造成缓存中毒
+            if _kb_versions.get(kb_id, 0) != read_version:
+                logger.debug(f"NetworkX 图快照过期，跳过缓存写回 kb={kb_id}")
+                return G
+            _nx_cache[kb_id] = (G, read_version)
 
         logger.debug(f"NetworkX 图已加载 kb={kb_id}: {G.number_of_nodes()}节点 {G.number_of_edges()}边")
         return G

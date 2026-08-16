@@ -29,6 +29,7 @@ python-louvain>=0.16,<1
 
 # 数据处理
 numpy>=1.26,<3  # v4.1: 范围钉版 — Windows/Linux 下与 paddle/lancedb 的兼容版本不同
+pandas==2.3.3  # v4.1: LanceDB to_pandas() 必需（此前靠本地 venv 隐式存在，CI 缺失）
 
 # NLP
 jieba==0.42.1

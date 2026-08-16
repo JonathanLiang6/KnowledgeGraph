@@ -16,7 +16,7 @@ openai==2.30.0
 httpx==0.28.1
 
 # Embedding / Reranker
-sentence-transformers==5.6.0
+sentence-transformers>=2.7.0,<6  # v4.1: 范围钉版 — numpy/torch 跨平台版本矩阵由解析器决定
 torch==2.12.1
 
 # 检索
@@ -25,10 +25,10 @@ pyarrow==22.0.0
 
 # 图计算 (Phase 1: GraphRAG 基础)
 networkx==3.6.1
-python-louvain==0.16
+python-louvain>=0.16,<1
 
 # 数据处理
-numpy==2.4.6
+numpy>=1.26,<3  # v4.1: 范围钉版 — Windows/Linux 下与 paddle/lancedb 的兼容版本不同
 
 # NLP
 jieba==0.42.1
@@ -41,10 +41,10 @@ ebooklib==0.20
 filetype==1.2.0
 
 # v3.2: Q3 多模态图像处理
-paddlepaddle==3.0.0     # PaddlePaddle CPU (OCR)
-paddleocr==2.9.0        # PaddleOCR 中文识别
+paddlepaddle>=3.0.0,<4  # PaddlePaddle CPU (OCR)
+paddleocr>=2.9.0,<3  # PaddleOCR 中文识别
 Pillow==12.1.1
-transformers==5.12.1
+transformers>=4.40.0,<6
 
 # v3.2: Q8 联网搜索
 duckduckgo-search==5.0  # DuckDuckGo 免费搜索

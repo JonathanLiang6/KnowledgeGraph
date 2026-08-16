@@ -1,7 +1,11 @@
 <template>
   <div class="graph-workspace">
     <div class="graph-main">
-      <canvas ref="canvasRef" class="graph-canvas" />
+      <!-- v4.1 (#87): 数据加载骨架屏（此前拉取期间画布空白无反馈） -->
+      <div v-if="graphLoading" class="graph-skeleton-layer">
+        <AppSkeleton :title="true" :lines="6" />
+      </div>
+      <canvas v-show="!graphLoading" ref="canvasRef" class="graph-canvas" />
 
       <!-- 右侧面板容器（上中下排布） -->
       <div class="right-panels">
@@ -120,8 +124,10 @@ import { useGraphRenderer } from '../composables/useGraphRenderer'
 import { getGraphData } from '../api/graph'
 import { ElMessage } from 'element-plus'
 import { ArrowRight } from '@element-plus/icons-vue'
+import AppSkeleton from '../components/AppSkeleton.vue'
 
 const route = useRoute()
+const graphLoading = ref(true)  // v4.1 (#87): 首次数据就绪前显示骨架屏
 const canvasRef = ref(null)
 const legend = ref({})
 const nodeCount = ref(0)
@@ -219,6 +225,7 @@ function onWeightChange(val) {
 }
 
 async function refreshData() {
+  graphLoading.value = nodeCount.value === 0  // 首次加载显示骨架屏，后续刷新不打断画面
   try {
     const res = await getGraphData({ kb_id: route.params.id, limit: 200 })
     const data = markRaw({
@@ -243,6 +250,8 @@ async function refreshData() {
   } catch (e) {
     console.error('加载图谱数据失败:', e)
     ElMessage.error('加载图谱数据失败')
+  } finally {
+    graphLoading.value = false
   }
 }
 
@@ -601,3 +610,11 @@ onUnmounted(() => {
   }
 }
 </style>
+
+/* v4.1 (#87): 图谱加载骨架屏覆盖层 */
+.graph-skeleton-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: var(--bg-page, #f6f8f6);
+}

@@ -634,3 +634,41 @@ input, textarea, select {
     font-size: 18px;
   }
 }
+
+
+// ==========================================
+// v4.1 (#87): 视觉微交互 — 卡片悬浮/焦点环/减弱动效
+// ==========================================
+
+/* 卡片悬浮微交互：轻抬升 + 柔和阴影（仅 pointer 设备，触屏不触发 hover） */
+@media (hover: hover) {
+  .glass-card,
+  .stats-panel,
+  .el-card {
+    transition: transform 0.25s cubic-bezier(0.215, 0.61, 0.355, 1),
+                box-shadow 0.25s cubic-bezier(0.215, 0.61, 0.355, 1);
+  }
+  .glass-card:hover,
+  .stats-panel:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 28px rgba(27, 79, 52, 0.12);
+  }
+}
+
+/* 键盘焦点环：森林绿描边，鼠标操作不显示（a11y + 美观） */
+:focus-visible {
+  outline: 2px solid rgba(46, 125, 80, 0.65);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* 尊重系统"减弱动态效果"偏好：关闭过渡与动画 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -36,7 +36,11 @@
     </div>
 
     <!-- 文档表格 -->
-    <el-table :data="filteredDocs" style="width: 100%" v-loading="loading" empty-text="暂无文档，请先上传">
+    <!-- v4.1 (#87): 首次加载显示骨架屏（此前为空白表格+转圈） -->
+    <div v-if="initialLoading" class="docs-skeleton">
+      <AppSkeleton :title="true" :lines="6" />
+    </div>
+    <el-table v-else :data="filteredDocs" style="width: 100%" v-loading="loading" empty-text="暂无文档，请先上传">
       <el-table-column prop="filename" label="文件名" min-width="200">
         <template #default="{ row }">
           <span class="file-name">{{ row.filename }}</span>
@@ -106,6 +110,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
+import AppSkeleton from '../components/AppSkeleton.vue'
 import { getDocuments, uploadDocument, uploadDocumentsBatch, deleteDocument } from '../api/document'
 import { Upload, Delete, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -114,6 +119,8 @@ const route = useRoute()
 const fileInput = ref(null)
 const docs = ref([])
 const loading = ref(false)
+const initialLoading = ref(true)  // v4.1 (#87): 首次数据就绪前的骨架屏
+watch(loading, (v) => { if (!v) initialLoading.value = false })
 const filterStatus = ref('')
 const searchQuery = ref('')
 const searchDebounce = ref(null)
@@ -418,3 +425,8 @@ onBeforeUnmount(() => {
   }
 }
 </style>
+
+/* v4.1 (#87): 文档列表骨架屏 */
+.docs-skeleton {
+  padding: 8px 0;
+}

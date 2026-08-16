@@ -146,7 +146,7 @@ class RAGService:
         if config.ENABLE_GRAPH_RAG and kb_id and db:
             results = await _graph_enhanced_search_async(query, top_k, use_rerank, kb_id, db)
         else:
-            results = _do_search(query, top_k, use_rerank, kb_id=kb_id)
+            results = await _do_search_async(query, top_k, use_rerank, kb_id=kb_id)
 
         elapsed_ms = (time.monotonic() - t_start) * 1000
 
@@ -344,6 +344,26 @@ def _do_search(
     return results[:top_k]
 
 
+async def _do_search_async(
+    query: str,
+    top_k: int = None,
+    use_rerank: bool = True,
+    kb_id: str = None,
+) -> List[SearchResult]:
+    """_do_search 的异步包装 (v4.1 #51)：encode/rerank/LanceDB/FTS5 全部在
+    专用 CPU 线程池执行，不阻塞事件循环（多用户场景 API 不再互相拖垮）。"""
+    import asyncio
+    import functools
+
+    from app.core.cpu_pool import get_cpu_pool
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        get_cpu_pool(),
+        functools.partial(_do_search, query, top_k, use_rerank, kb_id=kb_id),
+    )
+
+
 def invalidate_kb_cache(kb_id: str):
     """文档变更时调用，递增知识库内容版本号使缓存失效"""
     _kb_content_versions[kb_id] = _kb_content_versions.get(kb_id, 0) + 1
@@ -374,14 +394,14 @@ async def _graph_enhanced_search_async(
         graph_results = await retriever.retrieve(query, kb_id, db, top_k=top_k)
     except Exception as e:
         logger.warning(f"[GraphRAG] 图检索失败，回退到混合检索: {e}")
-        return _do_search(query, top_k, use_rerank, kb_id=kb_id)
+        return await _do_search_async(query, top_k, use_rerank, kb_id=kb_id)
 
     if not graph_results:
         logger.debug("[GraphRAG] 图检索无结果，使用混合检索")
-        return _do_search(query, top_k, use_rerank, kb_id=kb_id)
+        return await _do_search_async(query, top_k, use_rerank, kb_id=kb_id)
 
-    # 标准混合检索（#46: 同样按 kb_id 隔离）
-    hybrid_results = _do_search(query, top_k, use_rerank, kb_id=kb_id)
+    # 标准混合检索（#46: 同样按 kb_id 隔离；#51: CPU 密集检索入专用线程池）
+    hybrid_results = await _do_search_async(query, top_k, use_rerank, kb_id=kb_id)
 
     # 将图检索结果转换为 SearchResult 格式
     # v4.0: 移除 RRF 融合前的权重预乘（RRF 基于排名而非原始分数，预乘无意义）

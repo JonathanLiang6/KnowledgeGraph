@@ -138,9 +138,10 @@ async def get_graph_data(
     from app.services.graph_service import GraphService
     from app.models.graph_entity import GraphEntity, GraphRelation
 
-    # 从独立图存储表加载 NetworkX 图
+    # 从独立图存储表加载 NetworkX 图（v4.1 #66: limit 下推到 SQL，
+    # 按权重取 Top-N 实体，不再全量加载后内存截断）
     if kb_id:
-        G = await GraphService.load_networkx(db, kb_id)
+        G = await GraphService.load_networkx(db, kb_id, limit=limit)
     else:
         # 无 kb_id 时聚合所有 KB 的数据
         G = None

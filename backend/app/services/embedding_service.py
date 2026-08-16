@@ -23,8 +23,10 @@ logger = logging.getLogger(__name__)
 _embedding_model = None
 _model_lock = threading.Lock()
 
-MODEL_DIR = os.path.join(config.DATA_DIR, "models", "bge-small-zh-v1.5")
+# v4.1 (#51): 本地模型目录从 EMBEDDING_MODEL 派生（此前硬编码 bge-small-zh-v1.5，
+# 修改 EMBEDDING_MODEL 配置时实际加载路径不变，配置形同虚设）
 MODEL_NAME = config.EMBEDDING_MODEL  # "BAAI/bge-small-zh-v1.5"
+MODEL_DIR = os.path.join(config.DATA_DIR, "models", MODEL_NAME.split("/")[-1])
 
 
 # ─── 最小 BERT 模型（仅编码器，无依赖）───────────────────────────
@@ -262,6 +264,15 @@ def _load_model():
             "max_length": cfg.get("max_position_embeddings", 512),
         }
 
+        # v4.1 (#51): EMBEDDING_DIM 配置接线 — 与模型实际维度不一致时告警
+        # （向量索引维度以模型实际输出为准，配置仅作声明性校验）
+        if config.EMBEDDING_DIM and config.EMBEDDING_DIM != _embedding_model["dim"]:
+            logger.warning(
+                f"EMBEDDING_DIM 配置为 {config.EMBEDDING_DIM}，"
+                f"但模型 {MODEL_NAME} 实际维度为 {_embedding_model['dim']}，"
+                f"以模型实际维度为准（请修正 .env 中的 EMBEDDING_DIM）"
+            )
+
         logger.info(f"Embedding 模型加载完成: dim={cfg['hidden_size']}, device={config.EMBEDDING_DEVICE}")
         return _embedding_model
 
@@ -343,10 +354,18 @@ class EmbeddingService:
         if not texts:
             return []
         import asyncio
+        from app.core.cpu_pool import get_cpu_pool
         loop = asyncio.get_running_loop()
-        from concurrent.futures import ThreadPoolExecutor
-        # 使用默认线程池执行 CPU 密集型任务
-        return await loop.run_in_executor(None, cls.encode, texts)
+        # v4.1 (#51): 使用专用 CPU 线程池（受 CPU_WORKER_THREADS 配置约束）
+        return await loop.run_in_executor(get_cpu_pool(), cls.encode, texts)
+
+    @classmethod
+    async def encode_single_async(cls, text: str) -> List[float]:
+        """单文本异步编码（不阻塞事件循环）"""
+        if not text:
+            return []
+        results = await cls.encode_async([text])
+        return results[0] if results else []
 
     @classmethod
     def encode_single(cls, text: str) -> List[float]:

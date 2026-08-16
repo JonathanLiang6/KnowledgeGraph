@@ -14,10 +14,14 @@ export function chatCompletions(data) {
 // v4.0: 增加 Agent 推理事件处理 (agent/thought, agent/action, agent/observation)
 export function chatCompletionsStream(data, onChunk, onDone, onError, onAgentEvent) {
   const controller = new AbortController()
+  // v4.1: 与 axios 实例一致，注入可选 API Token
+  const streamHeaders = { 'Content-Type': 'application/json' }
+  const apiToken = import.meta.env.VITE_API_TOKEN || ''
+  if (apiToken) streamHeaders['X-API-Token'] = apiToken
 
   fetch('/api/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: streamHeaders,
     body: JSON.stringify({ ...data, stream: true }),
     signal: controller.signal,
   })

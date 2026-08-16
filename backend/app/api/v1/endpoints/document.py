@@ -165,11 +165,11 @@ async def upload_document(
     if not kb:
         raise HTTPException(status_code=404, detail="知识库不存在")
 
-    # v3.2: 按知识库名称分文件夹存储，方便管理
-    kb_folder = sanitize_filename(kb.name)
+    # v4.1: 目录按 kb_id 隔离（防止同名 KB 共享目录），文件名加 uuid 前缀（防止同目录同名覆盖）
+    kb_folder = f"kb_{kb_id}_{sanitize_filename(kb.name)[:40]}"
     upload_dir = os.path.join(config.LOCAL_DATA_DIR, kb_folder)
     ensure_dir(upload_dir)
-    safe_filename = sanitize_filename(raw_filename)
+    safe_filename = f"{uuid.uuid4().hex[:8]}_{sanitize_filename(raw_filename)}"
     stored_path = os.path.join(upload_dir, safe_filename)
 
     total_written = stream_save_upload(file.file, stored_path)
@@ -263,7 +263,8 @@ async def batch_upload_documents(
     if not kb:
         raise HTTPException(status_code=404, detail="知识库不存在")
 
-    kb_folder = sanitize_filename(kb.name)
+    # v4.1: 目录按 kb_id 隔离 + 文件名 uuid 前缀，杜绝跨知识库同名覆盖
+    kb_folder = f"kb_{kb_id}_{sanitize_filename(kb.name)[:40]}"
     upload_dir = os.path.join(config.LOCAL_DATA_DIR, kb_folder)
     ensure_dir(upload_dir)
 
@@ -279,8 +280,8 @@ async def batch_upload_documents(
             # 安全检查
             await _validate_upload(file)
 
-            # 保存文件
-            safe_filename = sanitize_filename(raw_filename)
+            # 保存文件（uuid 前缀防同名覆盖）
+            safe_filename = f"{uuid.uuid4().hex[:8]}_{sanitize_filename(raw_filename)}"
             stored_path = os.path.join(upload_dir, safe_filename)
 
             total_written = stream_save_upload(file.file, stored_path)
@@ -446,12 +447,21 @@ async def get_document(doc_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/{doc_id}")
-async def delete_document(doc_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_document(
+    doc_id: str,
+    confirm: bool = Query(default=False, description="必须传 confirm=true 执行不可逆删除"),
+    db: AsyncSession = Depends(get_db),
+):
     """
     删除文档及其文件和索引。
 
     P2: 同时清理混合检索引擎中的索引数据。
     """
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="删除操作不可逆：请显式传递 confirm=true 以确认删除",
+        )
     result = await db.execute(select(Document).where(Document.id == doc_id))
     doc = result.scalar_one_or_none()
     if not doc:

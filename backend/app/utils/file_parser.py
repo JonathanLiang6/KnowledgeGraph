@@ -75,6 +75,60 @@ def read_file_content(filepath: str) -> Optional[str]:
         return None
 
 
+# ─── 解压炸弹/超大输入防护 (v4.1) ──────────────────────────────────
+
+
+def _check_zip_safety(filepath: str) -> None:
+    """
+    校验 zip 类容器（docx/pptx/epub）的安全性：
+    - 总解压大小上限（PARSE_MAX_ZIP_TOTAL_MB）
+    - 单文件压缩比上限（PARSE_MAX_ZIP_RATIO），拦截解压炸弹
+
+    Raises:
+        ValueError: 超出安全限制时抛出，由 read_file_content 捕获后拒绝解析
+    """
+    from app.core.config import config
+
+    import zipfile
+    try:
+        with zipfile.ZipFile(filepath) as zf:
+            total = sum(info.file_size for info in zf.infolist())
+            limit_bytes = config.PARSE_MAX_ZIP_TOTAL_MB * 1024 * 1024
+            if total > limit_bytes:
+                raise ValueError(
+                    f"压缩包总解压大小 ({total / 1024 / 1024:.1f}MB) 超过限制 "
+                    f"({config.PARSE_MAX_ZIP_TOTAL_MB}MB)，已拒绝解析"
+                )
+            for info in zf.infolist():
+                if info.compress_size > 0 and info.file_size / info.compress_size > config.PARSE_MAX_ZIP_RATIO:
+                    raise ValueError(
+                        f"压缩比超限 ({info.file_size}/{info.compress_size} > "
+                        f"{config.PARSE_MAX_ZIP_RATIO})，疑似解压炸弹，已拒绝解析"
+                    )
+    except zipfile.BadZipFile:
+        # 非 zip 结构交给上层解析器按原逻辑报错
+        pass
+
+
+def _enforce_total_chars_limit(texts: list, filepath: str) -> None:
+    """累积文本量超过 PARSE_MAX_TEXT_CHARS 时截断并告警（就地修改 texts）"""
+    from app.core.config import config
+
+    total = sum(len(t) for t in texts)
+    if total <= config.PARSE_MAX_TEXT_CHARS:
+        return
+    kept, acc = [], 0
+    for t in texts:
+        if acc >= config.PARSE_MAX_TEXT_CHARS:
+            break
+        kept.append(t)
+        acc += len(t)
+    texts[:] = kept
+    logger.warning(
+        f"解析文本量超过 {config.PARSE_MAX_TEXT_CHARS} 字符上限，已截断: {filepath}"
+    )
+
+
 # ─── 纯文本（含编码自动检测）───────────────────────────────────────
 
 
@@ -82,12 +136,18 @@ def _read_text_with_encoding_detect(filepath: str) -> str:
     """
     读取纯文本文件，自动检测编码。
     优先 UTF-8 → GBK → GB2312 → GB18030 → latin-1。
+    v4.1: 读取字节量设上限，防止超大文本撑爆内存。
     """
-    # 先读原始字节
-    with open(filepath, "rb") as f:
-        raw = f.read()
+    from app.core.config import config
 
-    # 尝试 UTF-8
+    max_bytes = config.PARSE_MAX_TEXT_CHARS * 4
+    with open(filepath, "rb") as f:
+        raw = f.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        logger.warning(f"文本文件超过解析上限，已截断: {filepath}")
+        raw = raw[:max_bytes]
+
+    # 尝试 UTF-8（截断可能切断多字节字符，用 ignore 容错）
     try:
         return raw.decode("utf-8")
     except UnicodeDecodeError:
@@ -113,24 +173,40 @@ def _read_text_with_encoding_detect(filepath: str) -> str:
 def _read_pdf(filepath: str) -> str:
     """
     读取 PDF 文件 (v2.4: 仅使用 pypdf, 移除已废弃的 PyPDF2 回退)。
+    v4.1: 页数与总文本量设上限。
     """
+    from app.core.config import config
+
     from pypdf import PdfReader
 
     reader = PdfReader(filepath)
     texts = []
     failed_pages = 0
 
-    for i, page in enumerate(reader.pages):
+    all_pages = reader.pages
+    if len(all_pages) > config.PARSE_MAX_PDF_PAGES:
+        logger.warning(
+            f"PDF 页数 ({len(all_pages)}) 超过上限 {config.PARSE_MAX_PDF_PAGES}，仅解析前 {config.PARSE_MAX_PDF_PAGES} 页: {filepath}"
+        )
+        all_pages = all_pages[: config.PARSE_MAX_PDF_PAGES]
+
+    total_chars = 0
+    for i, page in enumerate(all_pages):
         try:
             text = page.extract_text()
             if text:
-                texts.append(text.strip())
+                stripped = text.strip()
+                texts.append(stripped)
+                total_chars += len(stripped)
+                if total_chars > config.PARSE_MAX_TEXT_CHARS:
+                    logger.warning(f"PDF 文本量超过 {config.PARSE_MAX_TEXT_CHARS} 字符上限，已截断: {filepath}")
+                    break
         except Exception as e:
             failed_pages += 1
             logger.debug(f"PDF 第 {i} 页解析失败: {e}")
 
     if failed_pages:
-        logger.warning(f"PDF {filepath}: {failed_pages}/{len(reader.pages)} 页解析失败")
+        logger.warning(f"PDF {filepath}: {failed_pages}/{len(all_pages)} 页解析失败")
 
     if not texts:
         logger.error(f"PDF 无有效文本: {filepath}")
@@ -143,7 +219,8 @@ def _read_pdf(filepath: str) -> str:
 
 
 def _read_docx(filepath: str) -> str:
-    """读取 Word 文档，保留标题层级"""
+    """读取 Word 文档，保留标题层级（v4.1: 解压炸弹防护）"""
+    _check_zip_safety(filepath)
     from docx import Document
 
     doc = Document(filepath)
@@ -171,7 +248,8 @@ def _read_docx(filepath: str) -> str:
 
 
 def _read_pptx(filepath: str) -> str:
-    """读取 PowerPoint 文件，提取所有幻灯片文本"""
+    """读取 PowerPoint 文件，提取所有幻灯片文本（v4.1: 解压炸弹防护）"""
+    _check_zip_safety(filepath)
     from pptx import Presentation
 
     prs = Presentation(filepath)
@@ -203,7 +281,7 @@ def _read_pptx(filepath: str) -> str:
 
 
 def _read_epub(filepath: str) -> str:
-    """读取 EPUB 电子书"""
+    """读取 EPUB 电子书（v4.1: 解压炸弹防护 + 总文本量上限）"""
     try:
         import ebooklib
         from ebooklib import epub
@@ -211,6 +289,7 @@ def _read_epub(filepath: str) -> str:
         logger.warning("ebooklib 未安装，无法解析 EPUB")
         return ""
 
+    _check_zip_safety(filepath)
     book = epub.read_epub(filepath)
     texts = []
 
@@ -225,6 +304,7 @@ def _read_epub(filepath: str) -> str:
             except Exception as e:
                 logger.debug(f"EPUB 章节解析失败: {e}")
 
+    _enforce_total_chars_limit(texts, filepath)
     return "\n\n".join(texts)
 
 

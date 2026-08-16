@@ -142,8 +142,17 @@ def generate_id(text: str, prefix: str = "") -> str:
 
 
 def sanitize_filename(filename: str) -> str:
-    """移除文件名中的非法字符"""
-    return re.sub(r'[<>:"/\\|?*]', "_", filename)
+    """
+    清理文件名：移除非法字符并阻断路径逃逸 (v4.1 安全加固)。
+
+    - 先取 basename，剥离任何目录成分（含反斜杠）
+    - 折叠连续点号，禁止 `..` 逃逸与纯点文件名
+    """
+    name = filename.replace("\\", "/")
+    name = os.path.basename(name)
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
+    name = re.sub(r"\.{2,}", ".", name).strip(". ")
+    return name if name else "unnamed"
 
 
 def truncate_text(text: str, max_length: int = 500, suffix: str = "...") -> str:

@@ -19,7 +19,8 @@ export function uploadDocumentsBatch(formData) {
 }
 
 export function deleteDocument(id) {
-  return api.delete(`/documents/${id}`)
+  // v4.1: 后端删除接口要求 confirm=true 二次确认
+  return api.delete(`/documents/${id}`, { params: { confirm: true } })
 }
 
 export function getDocumentStats() {

@@ -17,5 +17,6 @@ export function updateKnowledgeBase(id, data) {
 }
 
 export function deleteKnowledgeBase(id) {
-  return api.delete(`/knowledge-bases/${id}`)
+  // v4.1: 后端删除接口要求 confirm=true 二次确认
+  return api.delete(`/knowledge-bases/${id}`, { params: { confirm: true } })
 }

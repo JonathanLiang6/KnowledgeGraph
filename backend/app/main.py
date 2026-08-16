@@ -178,6 +178,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# API 认证中间件 (v4.1) — API_AUTH_TOKEN 配置后，除 /health 外所有请求需携带 Token
+@app.middleware("http")
+async def api_auth_middleware(request: Request, call_next):
+    from app.core.security import auth_middleware_check
+    denied = auth_middleware_check(request, config.API_AUTH_TOKEN)
+    if denied is not None:
+        return denied
+    return await call_next(request)
+
 # Request-ID 中间件 — 注入唯一请求 ID 到响应头和日志上下文
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):

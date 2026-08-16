@@ -3,7 +3,7 @@
 """
 import os
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.core.database import get_db
@@ -117,8 +117,17 @@ async def update_knowledge_base(
 
 
 @router.delete("/{kb_id}")
-async def delete_knowledge_base(kb_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_knowledge_base(
+    kb_id: str,
+    confirm: bool = Query(default=False, description="必须传 confirm=true 执行不可逆删除"),
+    db: AsyncSession = Depends(get_db),
+):
     """删除知识库及其所有文档（含物理文件清理）"""
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="删除操作不可逆：请显式传递 confirm=true 以确认删除",
+        )
     result = await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))
     kb = result.scalar_one_or_none()
     if not kb:

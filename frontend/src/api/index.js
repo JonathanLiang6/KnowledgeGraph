@@ -10,12 +10,18 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+// v4.1: 可选 API Token（后端设置 API_AUTH_TOKEN 后必填，通过 VITE_API_TOKEN 注入）
+const apiToken = import.meta.env.VITE_API_TOKEN || ''
+
 // 请求拦截器
 api.interceptors.request.use(
   (config) => {
     // FormData 自动移除 Content-Type，让浏览器设置 boundary
     if (config.data instanceof FormData) {
       delete config.headers['Content-Type']
+    }
+    if (apiToken) {
+      config.headers['X-API-Token'] = apiToken
     }
     return config
   },

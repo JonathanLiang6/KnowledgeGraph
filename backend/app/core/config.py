@@ -46,9 +46,16 @@ class Config:
     # ========================
     # 服务器配置
     # ========================
-    SERVER_HOST: str = os.getenv("SERVER_HOST", "0.0.0.0")
+    # v4.1: 默认仅绑定本机回环；需要对外提供服务时在 .env 显式设置 SERVER_HOST=0.0.0.0
+    SERVER_HOST: str = os.getenv("SERVER_HOST", "127.0.0.1")
     SERVER_PORT: int = _safe_int("SERVER_PORT", "8013")
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+
+    # ========================
+    # API 认证 (v4.1 安全加固)
+    # ========================
+    # 为空 = 关闭认证（仅建议本地开发）；生产部署必须设置为强随机串
+    API_AUTH_TOKEN: str = os.getenv("API_AUTH_TOKEN", "")
 
     # ========================
     # DeepSeek V4 API 配置
@@ -108,6 +115,14 @@ class Config:
     }
     # 是否启用文件去重（基于 SHA256）
     ENABLE_FILE_DEDUP: bool = os.getenv("ENABLE_FILE_DEDUP", "true").lower() == "true"
+
+    # ========================
+    # 解析防护 (v4.1: 解压炸弹/超大文档上限)
+    # ========================
+    PARSE_MAX_PDF_PAGES: int = _safe_int("PARSE_MAX_PDF_PAGES", "1000")
+    PARSE_MAX_TEXT_CHARS: int = _safe_int("PARSE_MAX_TEXT_CHARS", "2000000")
+    PARSE_MAX_ZIP_TOTAL_MB: int = _safe_int("PARSE_MAX_ZIP_TOTAL_MB", "500")
+    PARSE_MAX_ZIP_RATIO: int = _safe_int("PARSE_MAX_ZIP_RATIO", "200")
 
     # ========================
     # 并发控制 (P1 流水线重构)

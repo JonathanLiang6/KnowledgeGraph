@@ -419,11 +419,11 @@ export function useTopologyRenderer(hostRef, opts = {}) {
         const pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.0035)
         ctx.beginPath(); ctx.arc(x, y, r + 7 + pulse * 7, 0, Math.PI * 2)
         ctx.fillStyle = isBranch
-          ? `rgba(46, 140, 140, ${(0.14 + 0.16 * pulse).toFixed(3)})`
+          ? `rgba(111, 191, 130, ${(0.16 + 0.18 * pulse).toFixed(3)})`
           : `rgba(30, 107, 64, ${(0.12 + 0.16 * pulse).toFixed(3)})`
         ctx.fill()
         ctx.beginPath(); ctx.arc(x, y, r + 2, 0, Math.PI * 2)
-        ctx.strokeStyle = isBranch ? 'rgba(140, 225, 225, 0.5)' : 'rgba(120, 220, 160, 0.5)'
+        ctx.strokeStyle = isBranch ? 'rgba(200, 245, 215, 0.6)' : 'rgba(120, 220, 160, 0.5)'
         ctx.lineWidth = 1.5
         ctx.stroke()
       }
@@ -440,10 +440,10 @@ export function useTopologyRenderer(hostRef, opts = {}) {
         }
       } else {
         // 分支/知识库节点
-        ctx.fillStyle = isBranch ? '#2E8C8C' : '#1E6B40'
+        ctx.fillStyle = isBranch ? '#6FBF82' : '#1E6B40'
         ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill()
 
-        ctx.strokeStyle = isBranch ? 'rgba(110, 205, 205, 0.4)' : 'rgba(60, 182, 110, 0.4)'
+        ctx.strokeStyle = isBranch ? 'rgba(170, 235, 190, 0.55)' : 'rgba(60, 182, 110, 0.4)'
         ctx.lineWidth = 1.5
         ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke()
 
@@ -458,7 +458,7 @@ export function useTopologyRenderer(hostRef, opts = {}) {
       const name = (n.name || '').length > 10 ? (n.name || '').slice(0, 10) + '..' : (n.name || '')
       ctx.font = `${n.is_root ? 14 : 13}px "PingFang SC","Microsoft YaHei",sans-serif`
       ctx.textAlign = 'center'; ctx.textBaseline = 'top'
-      ctx.fillStyle = n.is_root ? 'rgba(255, 255, 255, 0.9)' : isBranch ? 'rgba(205, 240, 240, 0.9)' : 'rgba(220, 240, 230, 0.85)'
+      ctx.fillStyle = n.is_root ? 'rgba(255, 255, 255, 0.9)' : isBranch ? 'rgba(232, 250, 238, 0.92)' : 'rgba(220, 240, 230, 0.85)'
       ctx.fillText(name, x, y + r + 10)
     })
     ctx.globalAlpha = 1
@@ -477,7 +477,7 @@ export function useTopologyRenderer(hostRef, opts = {}) {
     const radius = baseR * transform.k
     let color = '#1E6B40'
     if (n.is_root) color = '#2D8C4E'
-    else if (isBranch) color = '#2E8C8C'
+    else if (isBranch) color = '#6FBF82'
     return { x: screenX, y: screenY, radius, color, name: n.name, is_root: n.is_root, kb_id: n.kb_id }
   }
 

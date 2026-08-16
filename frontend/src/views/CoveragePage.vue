@@ -162,48 +162,48 @@ function renderChart() {
   chartInstance = echarts.init(chartRef.value)
   window.addEventListener('resize', handleResize)
 
-  const names = categories.value.map(c => c.name)
-  const counts = categories.value.map(c => c.count)
-
+  // v4.2: 柱状图 → 环形饼图（占比关系一目了然），森林绿系渐变色板
+  const GREEN_PALETTE = [
+    '#3a9d5b', '#6bc285', '#93d5a8', '#2e7d50', '#4fb374',
+    '#7ed09b', '#a5ddb8', '#57c084', '#c3e9d2', '#8ccfa2',
+  ]
   chartInstance.setOption({
     tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'shadow' },
-      formatter: (params) => {
-        const p = params[0]
-        return `${p.name}：${p.value} 个实体（${percentOf(p.value)}%）`
-      }
+      trigger: 'item',
+      formatter: (p) => `${p.name}：${p.value} 个实体（${p.percent}%）`
     },
-    grid: { left: 8, right: 16, top: 24, bottom: 8, containLabel: true },
-    xAxis: {
-      type: 'category',
-      data: names,
-      axisTick: { show: false },
-      axisLine: { lineStyle: { color: '#dcdfe6' } },
-      axisLabel: {
-        interval: 0,
-        rotate: names.length > 6 ? 30 : 0,
-        color: '#606266',
-        fontSize: 12
-      }
+    legend: {
+      orient: 'horizontal',
+      bottom: 0,
+      icon: 'circle',
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { color: '#606266', fontSize: 12 }
     },
-    yAxis: {
-      type: 'value',
-      minInterval: 1,
-      splitLine: { lineStyle: { color: '#ebeef5' } },
-      axisLabel: { color: '#909399' }
-    },
+    color: GREEN_PALETTE,
     series: [{
-      type: 'bar',
-      data: counts,
-      barMaxWidth: 40,
+      type: 'pie',
+      radius: ['44%', '70%'],
+      center: ['50%', '46%'],
+      avoidLabelOverlap: true,
       itemStyle: {
-        borderRadius: [4, 4, 0, 0],
-        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: '#6bc285' },
-          { offset: 1, color: '#3a9d5b' }
-        ])
-      }
+        borderRadius: 6,
+        borderColor: '#fff',
+        borderWidth: 2,
+      },
+      label: {
+        formatter: '{b}\\n{d}%',
+        color: '#606266',
+        fontSize: 12,
+        lineHeight: 16,
+      },
+      labelLine: { length: 12, length2: 8 },
+      emphasis: {
+        scale: true,
+        scaleSize: 6,
+        itemStyle: { shadowBlur: 16, shadowColor: 'rgba(58, 157, 91, 0.35)' },
+      },
+      data: categories.value.map(c => ({ name: c.name, value: c.count })),
     }]
   })
 }

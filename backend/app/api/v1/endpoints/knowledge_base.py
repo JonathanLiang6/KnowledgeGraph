@@ -171,6 +171,36 @@ async def delete_knowledge_base(
     except Exception as e:
         logger.warning(f"清理拓扑节点失败（非致命）: {e}")
 
+    # v4.1: 显式清理图谱数据（SQLite 未启用 PRAGMA foreign_keys，FK CASCADE 不生效）
+    try:
+        from app.models.graph_entity import GraphEntity, GraphRelation
+        from sqlalchemy import delete as sa_delete
+        await db.execute(sa_delete(GraphRelation).where(GraphRelation.kb_id == kb_id))
+        await db.execute(sa_delete(GraphEntity).where(GraphEntity.kb_id == kb_id))
+        logger.info(f"已清理知识库图谱数据: {kb_id}")
+    except Exception as e:
+        logger.warning(f"清理图谱数据失败（非致命）: {e}")
+
+    # v4.1: 失效检索缓存（KB 删除后不再返回陈旧结果）与图谱缓存
+    try:
+        from app.services.rag_service import invalidate_kb_cache
+        invalidate_kb_cache(kb_id)
+    except Exception as e:
+        logger.warning(f"检索缓存失效失败（非致命）: {e}")
+    try:
+        from app.services.graph_service import GraphService
+        GraphService._invalidate_nx_cache(kb_id)
+    except Exception as e:
+        logger.warning(f"图谱缓存失效失败（非致命）: {e}")
+
+    # v4.1: 清理各文档的阶段产物
+    try:
+        from app.tasks.document_tasks import cleanup_doc_artifacts
+        for did in doc_ids:
+            cleanup_doc_artifacts(did)
+    except Exception as e:
+        logger.warning(f"清理阶段产物失败（非致命）: {e}")
+
     # 删除 KB（级联删除文档记录）
     await db.delete(kb)
     await db.flush()

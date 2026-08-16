@@ -3,15 +3,19 @@
 
 P1 优化：
 - Stage 解耦：每个阶段独立为一个 handler，支持单独测试
-- 断点续传：状态持久化到 DB，同一进程内可从最后成功阶段恢复
-  （注意：chunks/embedding 等中间数据保存在内存中，服务重启后会丢失）
+- 断点续传：状态持久化到 DB；v4.1 起各阶段中间产物（解析文本/NLP 图/
+  LLM 精炼图/分块）落盘到 data/artifacts/{doc_id}/，服务重启后按阶段
+  回载数据而非只恢复状态码，修复"恢复后文档 DONE 但图谱永久缺失"
 - 并发控制：Semaphore 限制同时处理的文档数
-- ThreadPool：CPU 密集型任务（Embedding）在线程池中执行
+- ThreadPool：CPU 密集型阶段（解析/NLP/分块）在线程池中执行，
+  使 asyncio.wait_for 的阶段超时真实可取消（v4.1 修复假超时）
 - 超时保护：每个阶段可独立超时
 """
 import asyncio
+import json
 import logging
 import os
+import shutil
 import traceback
 from datetime import datetime
 from typing import Optional, Dict, Callable, Awaitable
@@ -54,6 +58,79 @@ def get_stage_for_status(status: DocumentStatus) -> int:
     """根据 DocumentStatus 返回已完成的最后一个 stage 索引（-1 表示未开始）"""
     status_to_idx = {stage_status: i for i, (_, _, stage_status, _) in enumerate(PROCESSING_STAGES)}
     return status_to_idx.get(status, -1)
+
+
+# ─── 阶段产物持久化 (v4.1: 断点续传不再丢失中间结果) ────────────────
+
+
+def _artifacts_dir(doc_id: str) -> str:
+    return os.path.join(config.DATA_DIR, "artifacts", doc_id)
+
+
+def _save_artifact_text(doc_id: str, name: str, text: str) -> None:
+    try:
+        d = _artifacts_dir(doc_id)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, name), "w", encoding="utf-8") as f:
+            f.write(text)
+    except OSError as e:
+        logger.warning(f"保存阶段产物失败 [{name}] doc={doc_id}: {e}")
+
+
+def _load_artifact_text(doc_id: str, name: str) -> Optional[str]:
+    path = os.path.join(_artifacts_dir(doc_id), name)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _save_artifact_json(doc_id: str, name: str, obj) -> None:
+    try:
+        d = _artifacts_dir(doc_id)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, name), "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False)
+    except (OSError, TypeError) as e:
+        logger.warning(f"保存阶段产物失败 [{name}] doc={doc_id}: {e}")
+
+
+def _load_artifact_json(doc_id: str, name: str):
+    path = os.path.join(_artifacts_dir(doc_id), name)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _has_artifact(doc_id: str, name: str) -> bool:
+    return os.path.exists(os.path.join(_artifacts_dir(doc_id), name))
+
+
+def cleanup_doc_artifacts(doc_id: str) -> None:
+    """清理文档的阶段产物（文档完成/删除时调用）"""
+    d = _artifacts_dir(doc_id)
+    if os.path.isdir(d):
+        shutil.rmtree(d, ignore_errors=True)
+
+
+class _RestoredChunk:
+    """从 chunks.json 恢复的轻量 chunk（具备 embedding/indexing 阶段所需接口）"""
+
+    def __init__(self, d: dict):
+        self._dict = d
+        self.text = d.get("text", "")
+        self.chunk_level = d.get("chunk_level", "child")
+        self._embedding = None
+
+    def to_dict(self) -> dict:
+        return self._dict
 
 # ─── 公共入口 ─────────────────────────────────────────────────────
 
@@ -110,30 +187,54 @@ async def _process_document(doc_id: str, filepath: str, task_id: str):
                 # 已是完成状态，但被手动触发重新处理
                 start_from = -1
 
-            # v2.5: 如果 chunks 无法恢复（server 重启后内存丢失），回退到 chunking
-            if start_from >= 4 and doc.chunk_count > 0:
-                logger.info(f"断点续传: chunks 丢失 (count={doc.chunk_count}), 从 chunking 重新开始")
-                start_from = 3
-
-            if start_from >= 0:
-                logger.info(f"断点续传: doc={doc_id} 从阶段 {start_from + 1} 继续")
-
-            # ─── 阶段执行 ───────────────────────────────────────
-
             word_count = doc.word_count or 0
             token_count = doc.token_count or 0
             result_graph = None
             refined_graph = None
             chunks = []
-            cached_content = None  # v2.5: 读取一次，多阶段复用
+            cached_content = None
 
-            # v2.5: 如果跳过 parsing 但后续阶段需要内容，先读取
+            if start_from == -1:
+                # 全新处理：清理上一轮残留的阶段产物
+                cleanup_doc_artifacts(doc_id)
+            else:
+                # v4.1: 从磁盘产物恢复中间结果，而非只恢复状态码
+                if start_from >= 4:
+                    restored_chunks = _load_artifact_json(doc_id, "chunks.json")
+                    if isinstance(restored_chunks, list) and restored_chunks:
+                        chunks = [_RestoredChunk(c) for c in restored_chunks]
+                    else:
+                        logger.info("断点续传: chunks 产物缺失，回退到 chunking 阶段")
+                        start_from = 3
+                if start_from >= 2:
+                    result_graph = _load_artifact_json(doc_id, "nlp_graph.json")
+                if start_from >= 3:
+                    refined_graph = _load_artifact_json(doc_id, "refined_graph.json")
+                if start_from >= 1:
+                    cached_content = _load_artifact_text(doc_id, "content.txt")
+                    if cached_content is None:
+                        logger.info("断点续传: 解析文本产物缺失，回退到 parsing 阶段")
+                        start_from = 0
+
+                # v4.1 保障：已跳过图构建阶段（nlp/llm）但图产物全部缺失时，
+                # 必须回退重建，否则文档会以 DONE 结束但知识图谱永久缺失
+                if start_from >= 2 and not (refined_graph or result_graph) and not doc.graph_data:
+                    logger.warning("断点续传: 图谱中间产物丢失，回退到 NLP 提取阶段重建图谱")
+                    start_from = 1
+                    refined_graph = None
+                    result_graph = None
+
+                logger.info(f"断点续传: doc={doc_id} 从阶段 {start_from + 1} 继续")
+
+            # 产物缺失时的兜底：跳过 parsing 但后续阶段需要内容时再读文件
             async def _ensure_content():
                 nonlocal cached_content
                 if cached_content is None:
                     cached_content = read_file_content(filepath)
                     if cached_content:
                         logger.debug(f"延迟读取文件内容: {len(cached_content)} 字符")
+
+            # ─── 阶段执行 ───────────────────────────────────────
 
             for i, (stage_key, progress, status, label) in enumerate(PROCESSING_STAGES):
                 if i < start_from:
@@ -151,21 +252,26 @@ async def _process_document(doc_id: str, filepath: str, task_id: str):
                         word_count, token_count, cached_content = await asyncio.wait_for(
                             _stage_parsing(db, doc, filepath, task_id), timeout=stage_timeout
                         )
+                        _save_artifact_text(doc_id, "content.txt", cached_content or "")
                     elif stage_key == "nlp_extract":
                         await _ensure_content()
                         result_graph = await asyncio.wait_for(
                             _stage_nlp_extract(db, doc, cached_content, task_id), timeout=stage_timeout
                         )
+                        _save_artifact_json(doc_id, "nlp_graph.json", result_graph)
                     elif stage_key == "llm_refine":
                         await _ensure_content()
                         refined_graph = await asyncio.wait_for(
                             _stage_llm_refine(db, doc, cached_content, result_graph, task_id), timeout=stage_timeout
                         )
+                        # 显式落盘（含 None：表示该阶段已执行、LLM 失败降级）
+                        _save_artifact_json(doc_id, "refined_graph.json", refined_graph)
                     elif stage_key == "chunking":
                         await _ensure_content()
                         chunks = await asyncio.wait_for(
                             _stage_chunking(db, doc, cached_content, refined_graph, task_id), timeout=stage_timeout
                         )
+                        _save_artifact_json(doc_id, "chunks.json", [c.to_dict() for c in chunks])
                     elif stage_key == "embedding":
                         await asyncio.wait_for(
                             _stage_embedding(db, doc, chunks, task_id), timeout=stage_timeout
@@ -208,6 +314,7 @@ async def _process_document(doc_id: str, filepath: str, task_id: str):
             doc.progress = 100.0
             doc.processed_at = datetime.now()
             await db.commit()  # 最终持久化
+            cleanup_doc_artifacts(doc_id)  # v4.1: 完成后清理阶段产物
 
             # v4.0: 通知缓存系统知识库内容已变更
             try:
@@ -264,7 +371,9 @@ async def _stage_parsing(
     """
     update_task(task_id, progress=5, stage="解析文档内容")
 
-    content = read_file_content(filepath)
+    # v4.1: 同步文件解析移入线程池，使 wait_for 超时真实可取消
+    loop = asyncio.get_running_loop()
+    content = await loop.run_in_executor(None, read_file_content, filepath)
     if not content:
         raise ValueError("文档内容解析失败或为空")
 
@@ -351,7 +460,9 @@ async def _stage_chunking(
         chunk_overlap=config.CHUNK_OVERLAP,
         strategy="parent_child",
     )
-    chunks = chunker.chunk(content, doc.id)
+    # v4.1: 同步分块（CPU 密集）移入线程池，使 wait_for 超时真实可取消
+    loop = asyncio.get_running_loop()
+    chunks = await loop.run_in_executor(None, lambda: chunker.chunk(content, doc.id))
     doc.chunk_count = len(chunks)
     await db.flush()
 

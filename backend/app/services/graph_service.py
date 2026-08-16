@@ -267,29 +267,40 @@ class GraphService:
 
     @classmethod
     async def load_networkx(
-        cls, db: AsyncSession, kb_id: str
+        cls,
+        db: AsyncSession,
+        kb_id: str,
+        limit: int = None,
     ) -> nx.DiGraph:
         """
         从数据库加载 NetworkX 有向图（带缓存）。
 
         节点属性: name, entity_type, weight, description, color
         边属性: relation_type, weight, sentence, source_doc_id
-        """
-        async with _nx_cache_lock:
-            if kb_id in _nx_cache:
-                cached_graph, cached_version = _nx_cache[kb_id]
-                if cached_version == _kb_versions.get(kb_id, 0):
-                    return cached_graph
-            # v4.1 (#52): 记录读取前版本号，写回时校验未被并发失效
-            read_version = _kb_versions.get(kb_id, 0)
 
-        # 加载实体
+        v4.1 (#66): limit 不为 None 时做限量加载（权重 Top-N 节点），
+        限量图不读也不写缓存，避免部分图污染全图缓存。
+        """
+        if limit is None:
+            async with _nx_cache_lock:
+                if kb_id in _nx_cache:
+                    cached_graph, cached_version = _nx_cache[kb_id]
+                    if cached_version == _kb_versions.get(kb_id, 0):
+                        return cached_graph
+                # v4.1 (#52): 记录读取前版本号，写回时校验未被并发失效
+                read_version = _kb_versions.get(kb_id, 0)
+
+        # 加载实体（#66: 限量时按权重取 Top-N，limit 下推到 SQL 而非内存截断）
         stmt = select(GraphEntity).where(GraphEntity.kb_id == kb_id)
+        if limit:
+            stmt = stmt.order_by(GraphEntity.weight.desc()).limit(limit)
         result = await db.execute(stmt)
         entities = result.scalars().all()
 
-        # 加载关系
+        # 加载关系（限量时给一个与节点规模相关的安全上限）
         rel_stmt = select(GraphRelation).where(GraphRelation.kb_id == kb_id)
+        if limit:
+            rel_stmt = rel_stmt.limit(limit * 4)
         rel_result = await db.execute(rel_stmt)
         relations = rel_result.scalars().all()
 
@@ -313,6 +324,9 @@ class GraphService:
                     source_doc_id=r.source_doc_id or "",
                     edge_id=r.id,
                 )
+
+        if limit is not None:
+            return G  # 限量图不写缓存
 
         async with _nx_cache_lock:
             # v4.1 (#52): DB 读取期间版本已变（图被并发更新/失效）→ 本次快照过期，
@@ -564,27 +578,48 @@ class GraphService:
         if source_id not in G or target_id not in G:
             return []
 
-        paths = []
-        try:
-            for path in nx.all_simple_paths(G, source_id, target_id, cutoff=max_hops):
-                relations = []
-                total_weight = 0.0
-                for i in range(len(path) - 1):
-                    edge = G.get_edge_data(path[i], path[i + 1]) or {}
-                    relations.append(edge.get("relation_type", "关联"))
-                    total_weight += edge.get("weight", 0.5)
-                paths.append({
-                    "path": path,
-                    "relations": relations,
-                    "length": len(path) - 1,
-                    "total_weight": round(total_weight, 4),
-                })
-        except nx.NetworkXNoPath:
-            pass
+        import asyncio
 
-        # 按路径长度和总权重排序
-        paths.sort(key=lambda p: (p["length"], -p["total_weight"]))
-        return paths[:20]  # 最多返回 20 条路径
+        from app.core.cpu_pool import get_cpu_pool
+
+        # v4.1 (#64): 密集图上 all_simple_paths 枚举呈指数级 —
+        # ① 计数熔断（MAX_ENUM_PATHS）防无限枚举；② 整个枚举移入 CPU 线程池，
+        # 不再同步阻塞事件循环
+        MAX_ENUM_PATHS = 200
+
+        def _enumerate_paths():
+            paths = []
+            try:
+                enumerated = 0
+                for path in nx.all_simple_paths(G, source_id, target_id, cutoff=max_hops):
+                    relations = []
+                    total_weight = 0.0
+                    for i in range(len(path) - 1):
+                        edge = G.get_edge_data(path[i], path[i + 1]) or {}
+                        relations.append(edge.get("relation_type", "关联"))
+                        total_weight += edge.get("weight", 0.5)
+                    paths.append({
+                        "path": path,
+                        "relations": relations,
+                        "length": len(path) - 1,
+                        "total_weight": round(total_weight, 4),
+                    })
+                    enumerated += 1
+                    if enumerated >= MAX_ENUM_PATHS:
+                        logger.warning(
+                            f"find_paths 枚举达到 {MAX_ENUM_PATHS} 条上限，提前截断 "
+                            f"(kb={kb_id}, hops={max_hops})"
+                        )
+                        break
+            except nx.NetworkXNoPath:
+                pass
+
+            # 按路径长度和总权重排序
+            paths.sort(key=lambda p: (p["length"], -p["total_weight"]))
+            return paths[:20]  # 最多返回 20 条路径
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(get_cpu_pool(), _enumerate_paths)
 
     # ---------- 社区检测 ----------
 

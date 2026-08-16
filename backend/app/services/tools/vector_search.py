@@ -30,7 +30,8 @@ async def vector_search(
     # v4.0: 使用纯向量检索（不经过 GraphRAG 增强，让 Agent 自行决定是否调用图遍历）
     try:
         query_vector = EmbeddingService.encode_single(query)
-        raw_results = hybrid_search_service.vector_store.search(query_vector, top_k=top_k)
+        # #46: 按 kb_id 隔离，只检索当前知识库的块
+        raw_results = hybrid_search_service.vector_store.search(query_vector, top_k=top_k, kb_id=kb_id)
         # 转换为 SearchResult 格式
         results = []
         for r in raw_results:

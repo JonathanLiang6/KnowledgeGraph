@@ -65,10 +65,10 @@
 
       <div class="topbar-hint">根节点 → 分支节点 → 知识库 · 单击知识库节点进入 · 右键弹出菜单</div>
 
-      <div ref="canvasHost" class="canvas-host" />
+      <div ref="canvasHost" class="canvas-host" role="application" tabindex="0" aria-label="知识拓扑导航画布：单击知识库节点进入，右键打开操作菜单" />
 
       <Teleport to="body">
-        <div v-if="menu.show" class="ctx-popup" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>
+        <div v-if="menu.show" class="ctx-popup" role="menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>
           <template v-if="menu.node">
             <div class="ctx-header" v-if="menu.node.name">
               <span class="ctx-header-icon">{{ menu.node.icon || '📂' }}</span>
@@ -101,7 +101,7 @@
     <!-- ====== 节点对话框 ====== -->
     <Teleport to="body">
       <div v-if="dlg.node" class="modal-mask" @click.self="dlg.node = false">
-        <div class="modal-box">
+        <div class="modal-box" role="dialog" aria-modal="true">
           <h3>{{ editingNode ? '编辑节点' : '新建节点' }}</h3>
           <label>名称</label>
           <input v-model="nodeForm.name" class="fld" placeholder="节点名称" maxlength="255" />
@@ -139,7 +139,7 @@
     <!-- ====== 知识库对话框 ====== -->
     <Teleport to="body">
       <div v-if="dlg.kb" class="modal-mask" @click.self="dlg.kb = false">
-        <div class="modal-box">
+        <div class="modal-box" role="dialog" aria-modal="true">
           <h3>新建知识库</h3>
           <label>名称</label>
           <input v-model="kbForm.name" class="fld" placeholder="知识库名称" maxlength="255" />
@@ -208,14 +208,39 @@ onMounted(async () => {
   await loadTopology()
   await loadKBList()
   document.addEventListener('click', onDocClick)
+  // v4.1 (#70): 页面后台时暂停渲染循环
+  document.addEventListener('visibilitychange', handleVisibility)
+  // v4.1 (#86): Esc 关闭右键菜单与对话框（键盘可达性）
+  window.addEventListener('keydown', handleKeydown)
 })
 
 onBeforeUnmount(() => {
   if (renderer) renderer.destroy()
   document.removeEventListener('click', onDocClick)
+  document.removeEventListener('visibilitychange', handleVisibility)
+  window.removeEventListener('keydown', handleKeydown)
 })
 
 function onDocClick() { menu.show = false }
+
+function handleVisibility() {
+  if (document.hidden) renderer?.pauseRender?.()
+  else if (!showHero.value) renderer?.resumeRender?.()
+}
+
+function handleKeydown(e) {
+  if (e.key === 'Escape') {
+    menu.show = false
+    dlg.node = false
+    dlg.kb = false
+  }
+}
+
+// v4.1 (#70): 切回 Hero（画布 v-show 隐藏）时停掉力循环，返回时续跑
+watch(showHero, (hero) => {
+  if (hero) renderer?.pauseRender?.()
+  else renderer?.resumeRender?.()
+})
 
 async function loadTopology() {
   try {
@@ -226,7 +251,7 @@ async function loadTopology() {
 }
 
 async function loadKBList() {
-  try { const r = await getKnowledgeBases(); kbList.value = r.items || [] } catch {}
+  try { const r = await getKnowledgeBases(); kbList.value = r.items || [] } catch { /* 加载失败保持空列表 */ }
 }
 
 // ── 进入 / 刷新 ──────────────────────────────────────
@@ -237,7 +262,7 @@ async function refreshTopo() { await loadTopology(); await loadKBList(); await i
 async function initRenderer() {
   // 只确保根节点存在，不再自动为 KB 创建拓扑节点
   if (!topologyNodes.value.some(n => n.is_root)) {
-    try { await api.post('/topology/nodes', { name: '我的知识宇宙', icon: '🧠', kb_id: null }); await loadTopology() } catch {}
+    try { await api.post('/topology/nodes', { name: '我的知识宇宙', icon: '🧠', kb_id: null }); await loadTopology() } catch { /* 创建失败忽略，稍后重试 */ }
   }
 
   if (renderer) renderer.destroy()
@@ -283,7 +308,7 @@ function goToKB(node) {
 
 function menuEnterKB() { if (menu.node?.kb_id) goToKB(menu.node); menu.show = false }
 function menuEdit() { if (menu.node) openEdit(menu.node); menu.show = false }
-function menuCreateKBHere() { if (menu.node) { openCreateKB(menu.node.id) }; menu.show = false }
+function menuCreateKBHere() { if (menu.node) { openCreateKB(menu.node.id) } menu.show = false }
 async function menuDelete() { menu.show = false; if (menu.node) { editingNode.value = menu.node; await doDelete() } }
 function menuCreate() { menu.show = false; openCreateNode() }
 
@@ -355,7 +380,7 @@ async function doDelete() {
     }
     dlg.node = false; editingNode.value = null
     await refreshTopo()
-  } catch {} finally { busy.value = false }
+  } catch { /* 删除失败已在内部提示 */ } finally { busy.value = false }
 }
 
 async function deleteNode() { await doDelete() }

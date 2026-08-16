@@ -418,21 +418,4 @@ $sidebar-collapsed-width: 64px;
   margin-top: 12px;
 }
 
-.coverage-summary {
-  text-align: center;
-  font-size: 14px;
-  color: var(--text-secondary);
-  display: flex;
-  justify-content: center;
-  gap: 8px;
-  padding: 8px 0;
-  background: var(--bg-page);
-  border-radius: var(--radius-sm);
-}
-
-.coverage-chart {
-  width: 100%;
-  height: 380px;
-  margin-top: 16px;
-}
 </style>

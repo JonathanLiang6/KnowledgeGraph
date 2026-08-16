@@ -173,8 +173,11 @@ export function useGraphRenderer(canvasRef, width, height, onNodeClick) {
 
   function setMinWeight(w) {
     minWeight = w
+    // v4.1 (#72): 权重滑块只更新过滤参数并以低 alpha 重启现有仿真，
+    // 不再重建 forceSimulation（逐 tick 重建导致拖拽期间布局抖动+卡顿）
     applyFilters()
-    startSimulation()
+    if (simulation) simulation.alpha(0.3).restart()
+    else startSimulation()
   }
 
   function centerOn(node) {

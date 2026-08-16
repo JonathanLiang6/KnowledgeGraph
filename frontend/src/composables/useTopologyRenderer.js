@@ -31,7 +31,6 @@ export function useTopologyRenderer(hostRef, opts = {}) {
   const COLLIDE_DIST = 90    // 触发碰撞推开的最小距离
   const PUSH_FORCE = 0.08    // 碰撞推开的力度
   const PULL_FORCE = 0.04    // 拉回轨道的力度
-  const DRIFT_RANGE = 3      // 呼吸漂移的幅度（px）
   const SHRINK_DIST = 18     // 收缩距离（KB节点向中心收缩）
   const SHRINK_DURATION = 600 // 收缩时长 ms
 
@@ -453,7 +452,6 @@ export function useTopologyRenderer(hostRef, opts = {}) {
   function getNodeScreenInfo(nodeId) {
     const n = nodes.find(x => x.id === nodeId)
     if (!n || n.x == null || n.y == null) return null
-    const host = hostRef.value
     const rect = canvas?.getBoundingClientRect()
     if (!rect) return null
     const screenX = rect.left + n.x * transform.k + transform.x
@@ -489,5 +487,16 @@ export function useTopologyRenderer(hostRef, opts = {}) {
     schedule()
   }
 
-  return { init, updateData, resize, destroy, getNodeScreenInfo, setSelectedNode }
+  // v4.1 (#70): 可见性控制 — 画布隐藏/页面后台时暂停力循环与重绘（隐藏 canvas
+  // 不再以 60fps 空转），恢复可见时续跑
+  function pauseRender() {
+    forceLoopRunning = false
+  }
+
+  function resumeRender() {
+    if (!forceLoopRunning) startGentleForceLoop()
+    schedule()
+  }
+
+  return { init, updateData, resize, destroy, getNodeScreenInfo, setSelectedNode, pauseRender, resumeRender }
 }

@@ -59,7 +59,6 @@
             </div>
             <div class="coverage-meta">
               <span>占比 {{ percentOf(cat.count) }}%</span>
-              <span>{{ formatUpdated(cat.last_updated_days) }}</span>
             </div>
           </div>
         </div>
@@ -135,13 +134,16 @@ async function analyze() {
     // 拦截器已解包 response.data，这里直接拿到后端返回体
     const payload = await api.get(`/analytics/kb/${kbId}/coverage`)
     data.value = payload
-    await nextTick()
-    renderChart()
   } catch (e) {
     // 拦截器 reject 的是 plain Error，从 e.message 取信息
     error.value = e.message || '分析失败，请稍后重试'
   } finally {
     loading.value = false
+    // v4.1 修复：图表容器在 v-else-if 分支内，必须等 loading 结束、容器挂载后
+    // 再初始化 ECharts（此前在 loading 期间调用，chartRef 为 null 直接跳过，
+    // 导致"分类分布"永远空白）
+    await nextTick()
+    if (!error.value && categories.value.length) renderChart()
   }
 }
 

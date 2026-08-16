@@ -57,15 +57,23 @@ export function useTopologyRenderer(hostRef, opts = {}) {
     return 1 - Math.pow(1 - t, 3)
   }
 
+  // v4.1: 轻微回弹缓动 — 展开到位时带一点弹性 overshoot，比纯 easeOut 更有生命感
+  function easeOutBack(t) {
+    const c1 = 1.15, c3 = c1 + 1
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2)
+  }
+
   function getEnterProgress(n) {
     if (!enterAnimating) return 1
     const elapsed = performance.now() - enterStart
     const tier = nodeTier(n)
     const phase = ENTER_PHASES.find(p => p.tier === tier)
     if (!phase) return 1
-    if (elapsed < phase.delay) return 0
-    const localT = Math.min((elapsed - phase.delay) / phase.duration, 1)
-    return easeOutCubic(localT)
+    // v4.1: 同层节点按 id 错峰 0-125ms，避免整层"齐步走"的机械感
+    const stagger = (n.id.charCodeAt(n.id.length - 1) % 5) * 25
+    if (elapsed < phase.delay + stagger) return 0
+    const localT = Math.min((elapsed - phase.delay - stagger) / phase.duration, 1)
+    return Math.max(0, easeOutBack(localT))
   }
 
   function startEnterAnimation() {
@@ -192,12 +200,13 @@ export function useTopologyRenderer(hostRef, opts = {}) {
 
       // ── 呼吸漂移：在当前位置附近轻微浮动 ──
       // 用 sin/cos 加上节点 ID 的偏移，让每个节点的漂移相位不同
+      // v4.1: 双频漂移（不同周期叠加更像自然浮动），幅度提升到肉眼可感知但仍克制
       nodes.forEach(n => {
         if (n.is_root || n.x == null) return
         const phase = (n.id.charCodeAt(0) || 0) * 0.1
         const t = now * 0.001 + phase
-        n.x += Math.sin(t * 0.7) * 0.05
-        n.y += Math.cos(t * 0.5) * 0.05
+        n.x += Math.sin(t * 0.6) * 0.22 + Math.sin(t * 1.7) * 0.1
+        n.y += Math.cos(t * 0.45) * 0.22 + Math.cos(t * 1.3) * 0.1
       })
 
       schedule()
@@ -405,11 +414,18 @@ export function useTopologyRenderer(hostRef, opts = {}) {
 
       ctx.globalAlpha = isSettled ? 1 : prog
 
-      // 选中发光
+      // 选中发光 — v4.1: 呼吸脉冲（半径与透明度随时间缓动，而非静态圆）
       if (isSelected) {
-        ctx.beginPath(); ctx.arc(x, y, r + 12, 0, Math.PI * 2)
-        ctx.fillStyle = isBranch ? 'rgba(201, 138, 42, 0.22)' : 'rgba(30, 107, 64, 0.22)'
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.0035)
+        ctx.beginPath(); ctx.arc(x, y, r + 7 + pulse * 7, 0, Math.PI * 2)
+        ctx.fillStyle = isBranch
+          ? `rgba(46, 140, 140, ${(0.14 + 0.16 * pulse).toFixed(3)})`
+          : `rgba(30, 107, 64, ${(0.12 + 0.16 * pulse).toFixed(3)})`
         ctx.fill()
+        ctx.beginPath(); ctx.arc(x, y, r + 2, 0, Math.PI * 2)
+        ctx.strokeStyle = isBranch ? 'rgba(140, 225, 225, 0.5)' : 'rgba(120, 220, 160, 0.5)'
+        ctx.lineWidth = 1.5
+        ctx.stroke()
       }
 
       if (n.is_root) {
@@ -424,10 +440,10 @@ export function useTopologyRenderer(hostRef, opts = {}) {
         }
       } else {
         // 分支/知识库节点
-        ctx.fillStyle = isBranch ? '#C98A2A' : '#1E6B40'
+        ctx.fillStyle = isBranch ? '#2E8C8C' : '#1E6B40'
         ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill()
 
-        ctx.strokeStyle = isBranch ? 'rgba(245, 180, 80, 0.35)' : 'rgba(60, 182, 110, 0.35)'
+        ctx.strokeStyle = isBranch ? 'rgba(110, 205, 205, 0.4)' : 'rgba(60, 182, 110, 0.4)'
         ctx.lineWidth = 1.5
         ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke()
 
@@ -442,7 +458,7 @@ export function useTopologyRenderer(hostRef, opts = {}) {
       const name = (n.name || '').length > 10 ? (n.name || '').slice(0, 10) + '..' : (n.name || '')
       ctx.font = `${n.is_root ? 14 : 13}px "PingFang SC","Microsoft YaHei",sans-serif`
       ctx.textAlign = 'center'; ctx.textBaseline = 'top'
-      ctx.fillStyle = n.is_root ? 'rgba(255, 255, 255, 0.9)' : isBranch ? 'rgba(255, 220, 150, 0.85)' : 'rgba(220, 240, 230, 0.85)'
+      ctx.fillStyle = n.is_root ? 'rgba(255, 255, 255, 0.9)' : isBranch ? 'rgba(205, 240, 240, 0.9)' : 'rgba(220, 240, 230, 0.85)'
       ctx.fillText(name, x, y + r + 10)
     })
     ctx.globalAlpha = 1
@@ -461,7 +477,7 @@ export function useTopologyRenderer(hostRef, opts = {}) {
     const radius = baseR * transform.k
     let color = '#1E6B40'
     if (n.is_root) color = '#2D8C4E'
-    else if (isBranch) color = '#C98A2A'
+    else if (isBranch) color = '#2E8C8C'
     return { x: screenX, y: screenY, radius, color, name: n.name, is_root: n.is_root, kb_id: n.kb_id }
   }
 

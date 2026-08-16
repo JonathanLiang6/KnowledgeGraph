@@ -3,13 +3,13 @@
     <!-- 侧边栏：对话管理 -->
     <aside class="chat-sidebar">
       <div class="sidebar-header">
-        <button class="btn-primary new-chat-btn" @click="clearChat">
+        <button class="btn-primary new-chat-btn" @click="startNewChat">
           <el-icon :size="16"><Plus /></el-icon>
           <span>新对话</span>
         </button>
       </div>
       <!-- 快捷提示 -->
-      <div class="quick-prompts" v-if="messages.length === 0">
+      <div class="quick-prompts" v-if="messages.length === 0 && !currentConversationId">
         <p class="prompts-title">💡 试试这样问</p>
         <button
           v-for="(q, i) in suggestedQuestions"
@@ -18,10 +18,31 @@
           @click="sendPreset(q)"
         >{{ q }}</button>
       </div>
-      <!-- 对话历史占位 -->
-      <div class="chat-history" v-else>
-        <p class="history-hint">对话进行中</p>
-        <p class="history-sub">{{ messages.length }} 条消息</p>
+      <!-- v4.2: 服务端持久化的会话列表 -->
+      <div class="chat-history">
+        <p v-if="conversations.length === 0 && !conversationsLoading" class="history-hint">
+          发送第一条消息后，对话会自动保存到这里
+        </p>
+        <div
+          v-for="conv in conversations"
+          :key="conv.id"
+          class="conv-item"
+          :class="{ 'conv-item--active': conv.id === currentConversationId }"
+          role="button"
+          tabindex="0"
+          :aria-label="`打开对话 ${conv.title}`"
+          @click="openConversation(conv)"
+          @keydown.enter.prevent="openConversation(conv)"
+        >
+          <div class="conv-main">
+            <div class="conv-title" :title="conv.title">{{ conv.title }}</div>
+            <div class="conv-meta">{{ conv.message_count }} 条 · {{ formatConvTime(conv.updated_at) }}</div>
+          </div>
+          <div class="conv-actions" @click.stop>
+            <button class="conv-btn" title="重命名" aria-label="重命名对话" @click="renameConversationFlow(conv)">✏️</button>
+            <button class="conv-btn conv-btn--del" title="删除" aria-label="删除对话" @click="removeConversation(conv)">🗑️</button>
+          </div>
+        </div>
       </div>
     </aside>
 
@@ -177,7 +198,14 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { chatCompletionsStream } from '../api/chat'
+import {
+  chatCompletionsStream,
+  listConversations,
+  createConversation,
+  getConversation,
+  renameConversation,
+  deleteConversation,
+} from '../api/chat'
 import { Cpu, User, Plus, Promotion, Close, WarningFilled, ChatDotRound } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -188,6 +216,10 @@ const inputRef = ref(null)
 const messagesContainer = ref(null)
 
 const messages = ref([])
+// ═══ v4.2: 服务端会话管理 ═══
+const conversations = ref([])
+const currentConversationId = ref(null)
+const conversationsLoading = ref(false)
 const VISIBLE_PAGE_SIZE = 50
 const visibleCount = ref(VISIBLE_PAGE_SIZE)
 // 分页视图：始终包含最新的消息；渲染函数中 idx 相对可见列表计算
@@ -298,7 +330,6 @@ function renderMessageContent(msg, idx) {
 const typewriterQueue = []        // {char, type} — 非响应式数组（性能优化）
 const typewriterRunning = ref(false)
 let typewriterTimeoutId = null
-let lastAutoSave = 0
 const MAX_QUEUE_SIZE = 2000       // v4.0: 队列长度上限，防止内存无限增长
 
 // 速度映射表
@@ -350,7 +381,7 @@ function processTypewriterQueue(msg) {
       if (msg && !msg.content) {
         msg.content = '(AI 未返回内容)'
       }
-      saveMessages()
+      refreshConversations()  // v4.2: 服务端已落库，刷新侧栏
       scrollToBottom()
       return
     }
@@ -365,13 +396,6 @@ function processTypewriterQueue(msg) {
 
   const { base, pause } = getDelayForType(item.type)
   const totalDelay = pause > 0 ? base + pause : base
-
-  // 每 5 秒自动保存（断网保护）
-  const now = Date.now()
-  if (now - lastAutoSave > 5000) {
-    saveMessages()
-    lastAutoSave = now
-  }
 
   scrollToBottom(false)  // v4.1 (#69): 高频出队用 instant 滚动，避免 smooth 互相打架
   typewriterTimeoutId = setTimeout(() => processTypewriterQueue(msg), totalDelay)
@@ -402,23 +426,105 @@ function onKeydown(e) {
   }
 }
 
-function saveMessages() {
+// ═══ v4.2: 服务端会话管理（替代 localStorage） ═══
+
+async function refreshConversations() {
+  if (!route.params.id) return
   try {
-    localStorage.setItem(
-      `chat_${route.params.id}`,
-      JSON.stringify(messages.value.slice(-100))
-    )
-  } catch { /* quota exceeded, ignore */ }
+    const data = await listConversations(route.params.id)
+    conversations.value = data.items || []
+  } catch { /* 列表刷新失败不打断聊天 */ }
 }
 
-function loadMessages() {
+function formatConvTime(iso) {
+  if (!iso) return ''
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return ''
+  const diff = Date.now() - t
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
+  if (diff < 172_800_000) return '昨天'
+  const d = new Date(t)
+  return `${d.getMonth() + 1}/${d.getDate()}`
+}
+
+async function ensureConversation(firstMessage) {
+  if (currentConversationId.value) return currentConversationId.value
+  const title = firstMessage.replace(/\n/g, ' ').slice(0, 24) || '新对话'
+  const conv = await createConversation(route.params.id, title)
+  currentConversationId.value = conv.id
+  refreshConversations()
+  return conv.id
+}
+
+async function openConversation(conv) {
+  if (conv.id === currentConversationId.value) return
+  if (isStreaming.value) stopStreaming()
+  cleanupTypewriter()
+  conversationsLoading.value = true
   try {
-    const raw = localStorage.getItem(`chat_${route.params.id}`)
-    if (raw) messages.value = JSON.parse(raw)
+    const detail = await getConversation(conv.id)
+    currentConversationId.value = detail.id
+    messages.value = (detail.messages || []).map(m => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      reasoningSteps: m.reasoning_steps || undefined,
+    }))
     msgIdCounter = messages.value.length
-  } catch { messages.value = [] }
-  visibleCount.value = VISIBLE_PAGE_SIZE  // v4.1 (#87): 会话切换重置分页
-  historyMdCache.clear()  // v4.1 (#68): 历史消息缓存随会话切换失效
+    visibleCount.value = VISIBLE_PAGE_SIZE  // v4.1 (#87): 会话切换重置分页
+    historyMdCache.clear()  // v4.1 (#68): 渲染缓存随会话切换失效
+    nextTick(scrollToBottom)
+  } catch (e) {
+    ElMessage.error(e.message || '加载对话失败')
+  } finally {
+    conversationsLoading.value = false
+  }
+}
+
+async function renameConversationFlow(conv) {
+  try {
+    const { value } = await ElMessageBox.prompt('对话名称', '重命名对话', {
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputValue: conv.title,
+      inputPattern: /\S+/,
+      inputErrorMessage: '名称不能为空',
+    })
+    const updated = await renameConversation(conv.id, value.trim())
+    conv.title = updated.title
+    ElMessage.success('已重命名')
+  } catch { /* 用户取消 */ }
+}
+
+async function removeConversation(conv) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除对话「${conv.title}」吗？删除后不可恢复。`,
+      '删除对话',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch { return }
+  try {
+    await deleteConversation(conv.id)
+    if (conv.id === currentConversationId.value) startNewChat()
+    await refreshConversations()
+    ElMessage.success('对话已删除')
+  } catch (e) {
+    ElMessage.error(e.message || '删除失败')
+  }
+}
+
+/** 开始新对话 — 当前对话已保存在服务端，无需确认 */
+function startNewChat() {
+  if (isStreaming.value) stopStreaming()
+  cleanupTypewriter()
+  messages.value = []
+  currentConversationId.value = null
+  visibleCount.value = VISIBLE_PAGE_SIZE
+  historyMdCache.clear()
+  inputRef.value?.focus()
 }
 
 // ─── 核心操作 ─────────────────────────────────────────
@@ -442,6 +548,18 @@ async function sendMessage() {
 
   // v4.1 (#87): 新消息发送时收起历史分页，聚焦当前对话
   if (visibleCount.value < VISIBLE_PAGE_SIZE) visibleCount.value = VISIBLE_PAGE_SIZE
+
+  // v4.2: 确保服务端会话存在（首条消息自动建会话并以其前 24 字命名）
+  let conversationId = currentConversationId.value
+  if (!conversationId) {
+    try {
+      conversationId = await ensureConversation(text)
+    } catch (e) {
+      ElMessage.error(`创建对话失败: ${e.message || '未知错误'}`)
+      messages.value.pop()  // 回滚已入列的用户消息
+      return
+    }
+  }
 
   // 创建 assistant 占位
   const assistantId = genId()
@@ -468,6 +586,7 @@ async function sendMessage() {
       messages: chatMessages,
       kb_id: route.params.id || null,
       enable_web: enableWeb.value,
+      conversation_id: conversationId,  // v4.2: 服务端自动保存双边消息
     },
     // onChunk — 逐字符入队，打字机队列自动驱动显示
     (char, charType) => {
@@ -484,7 +603,8 @@ async function sendMessage() {
         if (!liveMsg.content) {
           liveMsg.content = '(AI 未返回内容)'
         }
-        saveMessages()
+        // v4.2: 延迟刷新 — 后端在 [DONE] 后一瞬才 commit 助手消息
+        setTimeout(refreshConversations, 1000)
         scrollToBottom()
       }
     },
@@ -494,7 +614,7 @@ async function sendMessage() {
       liveMsg.error = err.message || '请求失败'
       isStreaming.value = false
       streamController = null
-      saveMessages()
+      refreshConversations()  // v4.2: 用户消息已落库，刷新列表
       ElMessage.error(`请求失败: ${err.message}`)
     },
     // v4.0: onAgentEvent — 处理 Agent 推理事件
@@ -537,44 +657,30 @@ function stopStreaming() {
     clearTimeout(typewriterTimeoutId)
     typewriterTimeoutId = null
   }
-  saveMessages()
+  refreshConversations()  // v4.2: 中断时部分回答已落库，刷新列表
   ElMessage.info('已停止生成')
-}
-
-async function clearChat() {
-  if (messages.value.length > 0) {
-    try {
-      await ElMessageBox.confirm('确定要清空当前对话吗？', '新对话', {
-        confirmButtonText: '清空',
-        cancelButtonText: '取消',
-        type: 'info',
-      })
-    } catch {
-      return
-    }
-  }
-  if (isStreaming.value) stopStreaming()
-  cleanupTypewriter()
-  messages.value = []
-  historyMdCache.clear()  // v4.1 (#68): 清空对话同步清理渲染缓存
-  try { localStorage.removeItem(`chat_${route.params.id}`) } catch { /* ignore */ }
-  inputRef.value?.focus()
 }
 
 // ─── 生命周期 ─────────────────────────────────────────
 
-onMounted(() => {
-  loadMessages()
-  nextTick(scrollToBottom)
+onMounted(async () => {
+  await refreshConversations()
+  // v4.2: 自动恢复最近一次对话（无历史则保持新对话状态）
+  if (conversations.value.length > 0) {
+    await openConversation(conversations.value[0])
+  }
 })
 
-// 切换知识库时重新加载对话
+// 切换知识库时重新加载会话列表
 watch(() => route.params.id, (n, o) => {
   if (n !== o) {
     if (isStreaming.value) stopStreaming()
     cleanupTypewriter()
     messages.value = []
-    loadMessages()
+    currentConversationId.value = null
+    visibleCount.value = VISIBLE_PAGE_SIZE
+    historyMdCache.clear()
+    refreshConversations()
   }
 })
 
@@ -1099,4 +1205,94 @@ onBeforeUnmount(() => {
   color: #2e7d50;
   background: rgba(46, 125, 80, 0.15);
   border-color: rgba(46, 125, 80, 0.45);
+}
+
+
+/* ═══ v4.2: 侧栏会话列表 ═══ */
+.chat-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.conv-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.18s ease, border-color 0.18s ease;
+
+  &:hover {
+    background: rgba(46, 125, 80, 0.07);
+
+    .conv-actions {
+      opacity: 1;
+    }
+  }
+
+  &.conv-item--active {
+    background: rgba(46, 125, 80, 0.12);
+    border-color: rgba(46, 125, 80, 0.25);
+  }
+}
+
+.conv-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.conv-title {
+  font-size: 13px;
+  color: var(--text-primary, #303133);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conv-meta {
+  font-size: 11px;
+  color: var(--text-tertiary, #909399);
+  margin-top: 2px;
+}
+
+.conv-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+
+  /* 触屏/键盘聚焦时也可见 */
+  &:focus-within {
+    opacity: 1;
+  }
+}
+
+.conv-btn {
+  border: none;
+  background: transparent;
+  padding: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: rgba(46, 125, 80, 0.15);
+  }
+
+  &.conv-btn--del:hover {
+    background: rgba(245, 108, 108, 0.15);
+  }
+}
+
+@media (hover: none) {
+  .conv-actions {
+    opacity: 1;
+  }
 }

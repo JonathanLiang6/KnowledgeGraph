@@ -6,21 +6,30 @@ import json
 import logging
 import time
 import uuid
+from datetime import UTC
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import config
 from app.core.database import get_db
+from app.models.chat_conversation import ChatConversation, ChatMessage
 from app.models.document import Document, DocumentStatus
+from app.models.knowledge_base import KnowledgeBase
 from app.schemas.chat import (
+    ChatMessageOut,
     ChatRequest,
     ChatResponse,
     ChatResponseChoice,
     ChatUsage,
+    ConversationCreate,
+    ConversationDetail,
+    ConversationListResponse,
+    ConversationOut,
+    ConversationUpdate,
     Message,
 )
 from app.services.char_stream import char_stream
@@ -76,6 +85,13 @@ async def chat_completions(
 
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
+    # v4.2: 对话持久化 — 请求进入即落库用户消息（流式生成器运行时请求会话已关闭，
+    # 持久化统一走独立会话；助手消息在流/响应完成后落库）
+    if request.conversation_id:
+        user_query = _get_user_query(request.messages)
+        if user_query:
+            await _persist_user_message(request.conversation_id, user_query)
+
     # v3.2: Agent 模式（支持联网搜索开关）
     if request.model == "rag-agent" and request.kb_id:
         enable_web = getattr(request, 'enable_web', False)
@@ -109,6 +125,9 @@ async def chat_completions(
             if not full_answer:
                 logger.error(f"非流式 Agent 未产生回答: kb_id={request.kb_id}, error={agent_error}")
                 raise HTTPException(status_code=502, detail="Agent 推理失败，请稍后重试")
+            if request.conversation_id:
+                await _persist_assistant_message(request.conversation_id, full_answer)
+
             return ChatResponse(
                 id=chat_id,
                 created=int(time.time()),
@@ -134,7 +153,8 @@ async def chat_completions(
     if request.stream:
         return StreamingResponse(
             _stream_response(chat_id, request.model, messages,
-                           request.temperature, request.max_tokens),
+                           request.temperature, request.max_tokens,
+                           conversation_id=request.conversation_id),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -154,6 +174,9 @@ async def chat_completions(
             logger.exception("非流式 LLM 调用失败")
             raise HTTPException(status_code=502, detail="LLM 服务调用失败，请稍后重试") from e
 
+        if request.conversation_id:
+            await _persist_assistant_message(request.conversation_id, result["content"])
+
         return ChatResponse(
             id=chat_id,
             created=int(time.time()),
@@ -170,14 +193,15 @@ async def chat_completions(
 
 
 async def _stream_response(chat_id: str, model: str, messages: list[dict],
-                         temperature: float = None, max_tokens: int = None):
-    """SSE 流式响应生成器"""
+                         temperature: float = None, max_tokens: int = None,
+                         conversation_id: str = None):
+    """SSE 流式响应生成器 (v4.2: conversation_id 提供时流结束落库助手消息)"""
+    full_content = ""
     try:
         # 发送首帧
         yield f"data: {json.dumps({'id': chat_id, 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': model, 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
 
         # 流式生成内容 — 逐字符分类推送（打字机效果）
-        full_content = ""
         async for char_item in char_stream(
             DeepSeekClient.chat_stream(
                 messages=messages,
@@ -197,6 +221,10 @@ async def _stream_response(chat_id: str, model: str, messages: list[dict],
         logger.exception("流式响应错误")
         yield f"data: {json.dumps({'error': '服务处理异常，请稍后重试'})}\n\n"
         yield "data: [DONE]\n\n"
+
+    # v4.2: 已产出内容则落库（中途失败也保留部分回答）
+    if conversation_id and full_content:
+        await _persist_assistant_message(conversation_id, full_content)
 
 
 def _get_user_query(messages: list[Message]) -> str:
@@ -228,6 +256,10 @@ async def _stream_agent_response(
     session_id = getattr(request, 'session_id', 'default')
     enable_web = getattr(request, 'enable_web', False)
 
+    # v4.2: 收集推理步骤与最终答案，流结束后落库
+    reasoning_steps: list[dict] = []
+    final_answer = ""
+
     try:
         async with async_session_factory() as db:
             agent = ReActAgent(db, request.kb_id, session_id, enable_web=enable_web)
@@ -235,9 +267,13 @@ async def _stream_agent_response(
             async for event in agent.run(user_query):
                 event_type = event.get("type", "")
 
+                if event_type in ("agent/thought", "agent/action", "agent/observation", "agent/error"):
+                    reasoning_steps.append(event)
+
                 if event_type == "agent/answer":
                     # 最终答案 — 使用打字机效果逐字符推送
                     answer = event.get("content", "")
+                    final_answer = answer
                     async for char_item in char_stream(_char_by_char(answer)):
                         chunk = {
                             "id": chat_id,
@@ -281,6 +317,13 @@ async def _stream_agent_response(
         logger.exception("Agent SSE 响应错误")
         yield f"data: {json.dumps({'error': '服务处理异常，请稍后重试'})}\n\n"
         yield "data: [DONE]\n\n"
+
+    # v4.2: Agent 回答与推理步骤落库
+    if request.conversation_id and final_answer:
+        await _persist_assistant_message(
+            request.conversation_id, final_answer,
+            reasoning_steps=reasoning_steps or None,
+        )
 
 
 async def _char_by_char(text: str):
@@ -376,3 +419,216 @@ async def _build_rag_messages(
         return [system_msg] + [m.model_dump() for m in messages]
     else:
         return [m.model_dump() for m in messages]
+
+
+# ═══════════════════════════════════════════════════════════
+# v4.2: 对话管理（网页聊天应用式会话持久化）
+# ═══════════════════════════════════════════════════════════
+
+_MAX_PERSIST_CONTENT = 100000
+
+
+async def _persist_user_message(conversation_id: str, content: str) -> None:
+    """落库用户消息 + 自动命名（默认标题时取首条消息前 24 字）。
+
+    使用独立会话：流式生成器运行期间请求级会话已归还。
+    """
+    from app.core.database import async_session_factory
+
+    try:
+        async with async_session_factory() as db:
+            result = await db.execute(
+                select(ChatConversation).where(ChatConversation.id == conversation_id)
+            )
+            conv = result.scalar_one_or_none()
+            if not conv:
+                logger.warning(f"持久化跳过：对话不存在 {conversation_id}")
+                return
+            db.add(ChatMessage(
+                conversation_id=conversation_id,
+                role="user",
+                content=content[:_MAX_PERSIST_CONTENT],
+            ))
+            if conv.title == "新对话" and content.strip():
+                conv.title = content.strip().replace("\n", " ")[:24]
+            await db.commit()
+    except Exception:
+        logger.exception(f"用户消息落库失败 conversation={conversation_id}")
+
+
+async def _persist_assistant_message(
+    conversation_id: str, content: str, reasoning_steps: list | None = None
+) -> None:
+    """落库助手消息（含 Agent 推理步骤），并刷新对话活跃时间。"""
+    from app.core.database import async_session_factory
+
+    if not content:
+        return
+    try:
+        async with async_session_factory() as db:
+            db.add(ChatMessage(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=content[:_MAX_PERSIST_CONTENT],
+                reasoning_steps=reasoning_steps,
+            ))
+            result = await db.execute(
+                select(ChatConversation.updated_at).where(
+                    ChatConversation.id == conversation_id
+                )
+            )
+            if result.one_or_none() is None:
+                logger.warning(f"持久化跳过：对话不存在 {conversation_id}")
+                await db.rollback()
+                return
+            # 触发 onupdate 刷新活跃时间
+            await db.execute(
+                ChatConversation.__table__.update()
+                .where(ChatConversation.id == conversation_id)
+                .values(updated_at=func.now())
+            )
+            await db.commit()
+    except Exception:
+        logger.exception(f"助手消息落库失败 conversation={conversation_id}")
+
+
+def _as_utc(dt):
+    """SQLite CURRENT_TIMESTAMP 存 UTC 但无时区标注 — 补上 UTC 使前端
+    new Date() 解析正确（否则被当本地时间，显示偏差数小时）。"""
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
+
+
+def _conversation_out(conv: ChatConversation) -> ConversationOut:
+    return ConversationOut(
+        id=conv.id,
+        kb_id=conv.kb_id,
+        title=conv.title,
+        message_count=len(conv.messages),
+        created_at=_as_utc(conv.created_at),
+        updated_at=_as_utc(conv.updated_at),
+    )
+
+
+@router.get("/conversations", response_model=ConversationListResponse)
+async def list_conversations(
+    kb_id: str = Query(..., description="知识库ID"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """列出知识库下的对话（按最后活跃倒序）"""
+    conditions = [ChatConversation.kb_id == kb_id]
+    total = (
+        await db.execute(
+            select(func.count(ChatConversation.id)).where(*conditions)
+        )
+    ).scalar() or 0
+
+    result = await db.execute(
+        select(ChatConversation)
+        .where(*conditions)
+        .order_by(ChatConversation.updated_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    items = [_conversation_out(c) for c in result.scalars().all()]
+    return ConversationListResponse(items=items, total=total)
+
+
+@router.post("/conversations", response_model=ConversationOut, status_code=201)
+async def create_conversation(
+    data: ConversationCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """创建新对话"""
+    kb = (
+        await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == data.kb_id))
+    ).scalar_one_or_none()
+    if not kb:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+
+    conv = ChatConversation(kb_id=data.kb_id, title=data.title)
+    db.add(conv)
+    await db.flush()
+    await db.refresh(conv)
+    return _conversation_out(conv)
+
+
+@router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
+async def get_conversation(
+    conversation_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取对话详情（含全部消息）"""
+    result = await db.execute(
+        select(ChatConversation).where(ChatConversation.id == conversation_id)
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    detail = ConversationDetail(
+        id=conv.id,
+        kb_id=conv.kb_id,
+        title=conv.title,
+        message_count=len(conv.messages),
+        created_at=_as_utc(conv.created_at),
+        updated_at=_as_utc(conv.updated_at),
+        messages=[
+            ChatMessageOut(
+                id=m.id,
+                role=m.role,
+                content=m.content,
+                reasoning_steps=m.reasoning_steps,
+                created_at=_as_utc(m.created_at),
+            )
+            for m in conv.messages
+        ],
+    )
+    return detail
+
+
+@router.patch("/conversations/{conversation_id}", response_model=ConversationOut)
+async def rename_conversation(
+    conversation_id: str,
+    data: ConversationUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """重命名对话"""
+    result = await db.execute(
+        select(ChatConversation).where(ChatConversation.id == conversation_id)
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="对话不存在")
+
+    conv.title = data.title.strip()
+    await db.flush()
+    await db.refresh(conv)
+    return _conversation_out(conv)
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: str,
+    confirm: bool = Query(default=False, description="必须传 confirm=true 执行不可逆删除"),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除对话及其全部消息（不可逆）"""
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="删除操作不可逆：请显式传递 confirm=true 以确认删除",
+        )
+    result = await db.execute(
+        select(ChatConversation).where(ChatConversation.id == conversation_id)
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="对话不存在")
+
+    title = conv.title
+    await db.delete(conv)
+    await db.flush()
+    return {"message": f"对话 '{title}' 已删除", "id": conversation_id}

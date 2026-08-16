@@ -178,7 +178,7 @@ function hideNodeExpand() {
     const fadeStart = performance.now()
     const fadeDuration = 200 // 200ms 快速淡出
 
-    function fadeOut(now) {
+    const fadeOut = (now) => {
       const t = Math.min((now - fadeStart) / fadeDuration, 1)
       const eased = 1 - (1 - t) * (1 - t) // ease-out
       transitionAnim.overlayStyle = {

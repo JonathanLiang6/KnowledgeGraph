@@ -15,26 +15,27 @@
     <div v-else-if="error" class="error-state">
       <el-icon color="#F56C6C" :size="24"><WarningFilled /></el-icon>
       <p>{{ error }}</p>
+      <el-button type="primary" plain @click="analyze">重试</el-button>
     </div>
 
-    <div v-else-if="data" class="coverage-content">
+    <div v-else-if="categories.length" class="coverage-content">
       <!-- 概览卡片 -->
       <div class="stats-grid">
         <div class="stat-card">
-          <div class="stat-num">{{ data.total_entities }}</div>
+          <div class="stat-num">{{ totalEntities }}</div>
           <div class="stat-label">总实体数</div>
         </div>
         <div class="stat-card">
-          <div class="stat-num">{{ data.category_count }}</div>
+          <div class="stat-num">{{ categories.length }}</div>
           <div class="stat-label">分类数</div>
         </div>
         <div class="stat-card">
-          <div class="stat-num">{{ data.total_relations }}</div>
-          <div class="stat-label">关系数</div>
+          <div class="stat-num">{{ avgPerCategory }}</div>
+          <div class="stat-label">平均每类实体</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-num">{{ data.avg_relations_per_entity }}</div>
-          <div class="stat-label">平均关系度</div>
+        <div class="stat-card" :title="topCategory?.name">
+          <div class="stat-num">{{ topCategory?.count ?? 0 }}</div>
+          <div class="stat-label">最大分类：{{ topCategory?.name || '-' }}</div>
         </div>
       </div>
 
@@ -48,32 +49,26 @@
       <div class="analysis-section">
         <h3>覆盖度分析</h3>
         <div class="coverage-list">
-          <div v-for="(item, category) in data.category_coverage" :key="category" class="coverage-item">
+          <div v-for="cat in categories" :key="cat.name" class="coverage-item">
             <div class="coverage-header">
-              <span class="coverage-category">{{ category }}</span>
-              <span class="coverage-count">{{ item.count }} 个实体</span>
+              <span class="coverage-category">{{ cat.name }}</span>
+              <span class="coverage-count">{{ cat.count }} 个实体 · {{ formatUpdated(cat.last_updated_days) }}</span>
             </div>
             <div class="coverage-bar">
-              <div class="coverage-fill" :style="{ width: item.coverage + '%', background: item.color }" />
+              <div class="coverage-fill" :style="{ width: barWidth(cat.count) + '%', background: barColor(cat.name) }" />
             </div>
             <div class="coverage-meta">
-              <span>覆盖度 {{ item.coverage }}%</span>
-              <span>关键实体 {{ item.key_entities }}</span>
+              <span>占比 {{ percentOf(cat.count) }}%</span>
+              <span>{{ formatUpdated(cat.last_updated_days) }}</span>
             </div>
           </div>
         </div>
       </div>
+    </div>
 
-      <!-- 建议 -->
-      <div class="suggestions-section">
-        <h3>优化建议</h3>
-        <ul class="suggestions-list">
-          <li v-for="(suggestion, i) in data.suggestions" :key="i">
-            <el-icon :size="16"><InfoFilled /></el-icon>
-            <span>{{ suggestion }}</span>
-          </li>
-        </ul>
-      </div>
+    <div v-else-if="data" class="empty-state">
+      <BrainGraphLogo :size="80" variant="green" />
+      <p>该知识库暂无实体数据，请先上传文档并构建图谱</p>
     </div>
 
     <div v-else class="empty-state">
@@ -84,9 +79,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
-import { Loading, WarningFilled, InfoFilled } from '@element-plus/icons-vue'
+import { Loading, WarningFilled } from '@element-plus/icons-vue'
 import BrainGraphLogo from '../components/BrainGraphLogo.vue'
 import api from '../api'
 import * as echarts from 'echarts'
@@ -100,69 +95,127 @@ const data = ref(null)
 const chartRef = ref(null)
 let chartInstance = null
 
+// 按实体数降序，与后端契约一致：categories: [{name, count, last_updated_days}]
+const categories = computed(() => data.value?.categories ?? [])
+const totalEntities = computed(() => data.value?.total_entities ?? 0)
+const topCategory = computed(() => categories.value[0] ?? null)
+const avgPerCategory = computed(() => {
+  if (!categories.value.length) return '0'
+  return (totalEntities.value / categories.value.length).toFixed(1)
+})
+
+const BAR_COLORS = ['#3a9d5b', '#5fb877', '#8fcc9f', '#a9d8b6', '#c4e5cd']
+
+function barColor(name) {
+  const idx = categories.value.findIndex(c => c.name === name)
+  return BAR_COLORS[idx % BAR_COLORS.length]
+}
+
+function barWidth(count) {
+  const max = topCategory.value?.count || 1
+  return Math.max(2, Math.round((count / max) * 100))
+}
+
+function percentOf(count) {
+  if (!totalEntities.value) return '0.0'
+  return ((count / totalEntities.value) * 100).toFixed(1)
+}
+
+function formatUpdated(days) {
+  if (days === null || days === undefined) return '暂无更新记录'
+  if (days === 0) return '今天更新'
+  if (days === 1) return '1 天前更新'
+  return `约 ${days} 天前更新`
+}
+
 async function analyze() {
   loading.value = true
   error.value = ''
   try {
-    const res = await api.get(`/api/v1/knowledge_base/${kbId}/coverage`)
-    data.value = res.data
+    // 拦截器已解包 response.data，这里直接拿到后端返回体
+    const payload = await api.get(`/analytics/kb/${kbId}/coverage`)
+    data.value = payload
     await nextTick()
     renderChart()
   } catch (e) {
-    error.value = e.response?.data?.detail || '分析失败，请稍后重试'
+    // 拦截器 reject 的是 plain Error，从 e.message 取信息
+    error.value = e.message || '分析失败，请稍后重试'
   } finally {
     loading.value = false
   }
 }
 
-function renderChart() {
-  if (!chartRef.value || !data.value) return
-  if (chartInstance) chartInstance.dispose()
-  chartInstance = echarts.init(chartRef.value)
+// 具名 resize 处理器，便于卸载时移除（重复 addEventListener 同引用会去重）
+function handleResize() {
+  chartInstance?.resize()
+}
 
-  const categories = Object.keys(data.value.category_coverage)
-  const values = categories.map(c => data.value.category_coverage[c].count)
-  const colors = categories.map(c => data.value.category_coverage[c].color)
+function renderChart() {
+  if (!chartRef.value || !categories.value.length) return
+  // 重渲染前释放旧实例，避免泄漏
+  if (chartInstance) {
+    chartInstance.dispose()
+    chartInstance = null
+  }
+  chartInstance = echarts.init(chartRef.value)
+  window.addEventListener('resize', handleResize)
+
+  const names = categories.value.map(c => c.name)
+  const counts = categories.value.map(c => c.count)
 
   chartInstance.setOption({
     tooltip: {
-      trigger: 'item',
-      formatter: '{b}: {c} ({d}%)'
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params) => {
+        const p = params[0]
+        return `${p.name}：${p.value} 个实体（${percentOf(p.value)}%）`
+      }
     },
-    legend: {
-      bottom: 0,
-      left: 'center'
+    grid: { left: 8, right: 16, top: 24, bottom: 8, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: names,
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: '#dcdfe6' } },
+      axisLabel: {
+        interval: 0,
+        rotate: names.length > 6 ? 30 : 0,
+        color: '#606266',
+        fontSize: 12
+      }
+    },
+    yAxis: {
+      type: 'value',
+      minInterval: 1,
+      splitLine: { lineStyle: { color: '#ebeef5' } },
+      axisLabel: { color: '#909399' }
     },
     series: [{
-      type: 'pie',
-      radius: ['40%', '70%'],
-      center: ['50%', '45%'],
-      avoidLabelOverlap: false,
+      type: 'bar',
+      data: counts,
+      barMaxWidth: 40,
       itemStyle: {
-        borderRadius: 8,
-        borderColor: '#fff',
-        borderWidth: 2
-      },
-      label: {
-        show: true,
-        formatter: '{b}\n{d}%'
-      },
-      labelLine: {
-        show: true
-      },
-      data: categories.map((c, i) => ({
-        value: values[i],
-        name: c,
-        itemStyle: { color: colors[i] }
-      }))
+        borderRadius: [4, 4, 0, 0],
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: '#6bc285' },
+          { offset: 1, color: '#3a9d5b' }
+        ])
+      }
     }]
   })
-
-  window.addEventListener('resize', () => chartInstance?.resize())
 }
 
 onMounted(() => {
   analyze()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+  if (chartInstance) {
+    chartInstance.dispose()
+    chartInstance = null
+  }
 })
 </script>
 
@@ -201,6 +254,10 @@ onMounted(() => {
 
 .error-state {
   color: var(--color-danger);
+
+  .el-button {
+    margin-top: 8px;
+  }
 }
 
 .empty-state {
@@ -234,12 +291,14 @@ onMounted(() => {
     font-size: 13px;
     color: var(--text-tertiary);
     margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 
 .chart-section,
-.analysis-section,
-.suggestions-section {
+.analysis-section {
   background: var(--bg-card);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
@@ -308,31 +367,5 @@ onMounted(() => {
   margin-top: 6px;
   font-size: 12px;
   color: var(--text-tertiary);
-}
-
-.suggestions-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-
-  li {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    padding: var(--spacing-sm) var(--spacing-md);
-    background: rgba(58, 157, 91, 0.05);
-    border-radius: var(--radius-sm);
-    font-size: 14px;
-    color: var(--text-secondary);
-
-    :deep(.el-icon) {
-      color: var(--color-primary);
-      flex-shrink: 0;
-      margin-top: 2px;
-    }
-  }
 }
 </style>

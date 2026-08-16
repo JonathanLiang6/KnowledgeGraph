@@ -1,7 +1,7 @@
 """
 系统设置 Pydantic Schemas - 仅含系统参数，不含 API 密钥
 """
-from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -23,8 +23,8 @@ class VisualSettings(BaseModel):
 
 class SettingsUpdate(BaseModel):
     """设置更新请求"""
-    system: Optional[SystemParams] = None
-    visual: Optional[VisualSettings] = None
+    system: SystemParams | None = None
+    visual: VisualSettings | None = None
 
 
 class SystemStatus(BaseModel):

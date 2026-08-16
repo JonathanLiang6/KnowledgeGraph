@@ -1,7 +1,8 @@
 """
 聊天 Pydantic Schemas
 """
-from typing import Optional, List, Literal
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -17,20 +18,20 @@ class ChatRequest(BaseModel):
     """聊天请求 - OpenAI 兼容格式 (v3.2: + enable_web)"""
     model: str = Field("deepseek-chat", description="模型名称")
     # v4.1 (#83): 限制消息条数，防止历史消息无限堆积
-    messages: List[Message] = Field(..., max_length=50, description="对话消息列表（最多 50 条）")
-    temperature: Optional[float] = Field(1.0, ge=0.0, le=2.0)
-    max_tokens: Optional[int] = Field(4096, ge=1, le=32768)
-    stream: Optional[bool] = Field(False, description="是否流式输出")
-    kb_id: Optional[str] = Field(None, description="知识库ID(可选，用于RAG/Agent模式)")
-    session_id: Optional[str] = Field("default", description="会话ID(Agent模式记忆)")
-    enable_web: Optional[bool] = Field(False, description="是否启用联网搜索 (Q8)")
+    messages: list[Message] = Field(..., max_length=50, description="对话消息列表（最多 50 条）")
+    temperature: float | None = Field(1.0, ge=0.0, le=2.0)
+    max_tokens: int | None = Field(4096, ge=1, le=32768)
+    stream: bool | None = Field(False, description="是否流式输出")
+    kb_id: str | None = Field(None, description="知识库ID(可选，用于RAG/Agent模式)")
+    session_id: str | None = Field("default", description="会话ID(Agent模式记忆)")
+    enable_web: bool | None = Field(False, description="是否启用联网搜索 (Q8)")
 
 
 class ChatResponseChoice(BaseModel):
     """聊天响应选项"""
     index: int = 0
     message: Message
-    finish_reason: Optional[str] = "stop"
+    finish_reason: str | None = "stop"
 
 
 class ChatUsage(BaseModel):
@@ -46,7 +47,7 @@ class ChatResponse(BaseModel):
     object: str = "chat.completion"
     created: int
     model: str
-    choices: List[ChatResponseChoice]
-    usage: Optional[ChatUsage] = None
+    choices: list[ChatResponseChoice]
+    usage: ChatUsage | None = None
 
     model_config = {"from_attributes": True}

@@ -5,17 +5,15 @@
 - 基于 Markdown 标题的实体分类
 - 停用词过滤 + 共现关系提取
 """
-import re
 import logging
-from typing import List, Dict, Tuple, Optional
-from collections import Counter
+import re
 
 from app.core.colors import get_color_for_type
 
 logger = logging.getLogger(__name__)
 
 # 停用词表（中英文）
-STOP_WORDS = set([
+STOP_WORDS = {
     '的', '了', '和', '是', '就', '都', '而', '及', '与', '着', '或',
     '一个', '没有', '我们', '你们', '他们', '她', '他', '它', '这', '那',
     '在', '有', '被', '对', '等', '能', '也', '会', '可', '到', '以', '为',
@@ -24,10 +22,10 @@ STOP_WORDS = set([
     'should', 'may', 'might', 'can', 'shall', 'to', 'of', 'in', 'for',
     'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
     'before', 'after', 'above', 'below', 'between', 'under', 'again',
-])
+}
 
 # 中文词性 → 实体类型映射
-POS_TO_ENTITY_TYPE: Dict[str, str] = {
+POS_TO_ENTITY_TYPE: dict[str, str] = {
     'nr': '人物',      # 人名
     'ns': '地点',      # 地名
     'nt': '机构',      # 机构团体
@@ -64,7 +62,7 @@ class NLPEntityExtractor:
     """
 
     def __init__(self):
-        self.entity_colors: Dict[str, str] = {}
+        self.entity_colors: dict[str, str] = {}
         self.color_index = 0
         self._ensure_jieba_initialized()
 
@@ -88,7 +86,7 @@ class NLPEntityExtractor:
             self.color_index += 1
         return self.entity_colors[entity_type]
 
-    def extract(self, text: str) -> Tuple[List[dict], List[dict], Dict[str, str]]:
+    def extract(self, text: str) -> tuple[list[dict], list[dict], dict[str, str]]:
         """
         从文本中提取实体和关系。
 
@@ -114,7 +112,7 @@ class NLPEntityExtractor:
 
     # ─── 分块 ─────────────────────────────────────────────────────
 
-    def _split_by_headers(self, text: str) -> List[Tuple[str, str]]:
+    def _split_by_headers(self, text: str) -> list[tuple[str, str]]:
         """按 Markdown 标题分块，标题作为实体类型"""
         lines = text.split('\n')
         blocks = []
@@ -150,8 +148,8 @@ class NLPEntityExtractor:
     # ─── 实体提取（修复版）─────────────────────────────────────────
 
     def _extract_from_blocks(
-        self, blocks: List[Tuple[str, str]]
-    ) -> Tuple[List[dict], set, List[Tuple[str, List[str]]]]:
+        self, blocks: list[tuple[str, str]]
+    ) -> tuple[list[dict], set, list[tuple[str, list[str]]]]:
         """
         从每个块提取 TF-IDF 关键词作为实体。
 
@@ -170,7 +168,7 @@ class NLPEntityExtractor:
         processed_sentences = []
 
         # 按实体名称追踪最优 POS（用于类型推导）
-        entity_pos_best: Dict[str, Tuple[str, int]] = {}
+        entity_pos_best: dict[str, tuple[str, int]] = {}
 
         for title, content in blocks:
             # 分句
@@ -179,7 +177,7 @@ class NLPEntityExtractor:
             if not sentences:
                 continue
 
-            block_words: List[str] = []
+            block_words: list[str] = []
             for sentence in sentences:
                 # jieba 分词（含词性标注）
                 try:
@@ -259,15 +257,14 @@ class NLPEntityExtractor:
     # ─── 关系提取 ─────────────────────────────────────────────────
 
     def _extract_relationships(
-        self, entities: List[dict], processed_sentences: List[Tuple[str, List[str]]]
-    ) -> List[dict]:
+        self, entities: list[dict], processed_sentences: list[tuple[str, list[str]]]
+    ) -> list[dict]:
         """基于共现和模式匹配提取关系"""
-        relationships = []
         relationship_id = 0
         entity_map = {e["name"]: e["id"] for e in entities}
 
         # 用于合并重复边
-        edge_map: Dict[Tuple[str, str], dict] = {}
+        edge_map: dict[tuple[str, str], dict] = {}
 
         for sentence, words in processed_sentences:
             sentence_entities = [w for w in words if w in entity_map]
@@ -317,8 +314,8 @@ class NLPEntityExtractor:
     # ─── 优化去噪 ─────────────────────────────────────────────────
 
     def optimize(
-        self, entities: List[dict], relationships: List[dict]
-    ) -> Tuple[List[dict], List[dict]]:
+        self, entities: list[dict], relationships: list[dict]
+    ) -> tuple[list[dict], list[dict]]:
         """
         去噪优化 (v2.4: O(n+m) 替代 O(n*m))：
         - 过滤低权重实体

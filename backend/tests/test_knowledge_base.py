@@ -1,6 +1,7 @@
 """测试知识库 CRUD 端点"""
-import pytest
 import uuid
+
+import pytest
 
 
 @pytest.mark.anyio

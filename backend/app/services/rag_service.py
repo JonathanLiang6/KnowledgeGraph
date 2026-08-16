@@ -3,18 +3,17 @@ RAG 编排服务 - 串联 chunk → embed → hybrid search → rerank → build
 v4.0 (Phase 1): GraphRAG 升级 — 使用 GraphRetriever 替代内存索引 + 全局搜索 + 查询路由
 """
 import asyncio
-import time
 import logging
-from typing import List, Optional
-from cachetools import TTLCache
+import time
 
+from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import config
 from app.services.chunking_service import SemanticChunker
 from app.services.embedding_service import EmbeddingService
 from app.services.hybrid_search import SearchResult, hybrid_search_service, rrf_fusion
 from app.services.reranker_service import RerankerService
-from app.core.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +114,7 @@ class RAGService:
         db: AsyncSession = None,
         top_k: int = None,
         use_rerank: bool = True,
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         """
         异步查询检索 + GraphRAG 增强 (Phase 1)。
 
@@ -179,8 +178,8 @@ class RAGService:
         Map 阶段: 每个社区独立回答
         Reduce 阶段: 综合所有社区答案生成最终回答
         """
-        from app.services.graph_service import GraphService
         from app.services.deepseek_client import DeepSeekClient
+        from app.services.graph_service import GraphService
 
         communities = await GraphService.detect_communities(db, kb_id)
         if not communities:
@@ -265,7 +264,7 @@ class RAGService:
     @classmethod
     def build_context(
         cls,
-        results: List[SearchResult],
+        results: list[SearchResult],
         max_tokens: int = 3000,
         max_sources: int = None,
     ) -> str:
@@ -315,7 +314,7 @@ def _do_search(
     top_k: int = None,
     use_rerank: bool = True,
     kb_id: str = None,
-) -> List[SearchResult]:
+) -> list[SearchResult]:
     """核心检索流程（单轮）— #46: kb_id 透传到混合检索做知识库隔离"""
     if top_k is None:
         top_k = config.HYBRID_SEARCH_TOP_K
@@ -349,7 +348,7 @@ async def _do_search_async(
     top_k: int = None,
     use_rerank: bool = True,
     kb_id: str = None,
-) -> List[SearchResult]:
+) -> list[SearchResult]:
     """_do_search 的异步包装 (v4.1 #51)：encode/rerank/LanceDB/FTS5 全部在
     专用 CPU 线程池执行，不阻塞事件循环（多用户场景 API 不再互相拖垮）。"""
     import asyncio
@@ -376,7 +375,7 @@ async def _graph_enhanced_search_async(
     use_rerank: bool,
     kb_id: str,
     db: AsyncSession,
-) -> List[SearchResult]:
+) -> list[SearchResult]:
     """
     GraphRAG 增强检索 (Phase 1) — 使用 GraphRetriever 进行多跳图遍历。
 

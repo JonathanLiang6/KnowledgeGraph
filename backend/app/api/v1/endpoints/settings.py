@@ -2,21 +2,23 @@
 系统设置 API - 仅系统参数和视觉设置，不含 API 密钥
 """
 import logging
+
 from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from app.core.database import get_db
+
 from app.core.config import config
+from app.core.database import get_db
 from app.models.document import Document
-from app.models.system_setting import SystemSetting
 from app.models.knowledge_base import KnowledgeBase
+from app.models.system_setting import SystemSetting
 from app.schemas.settings import (
-    SystemParams,
-    VisualSettings,
-    SettingsUpdate,
-    SystemStatus,
     DataStats,
     SettingsResponse,
+    SettingsUpdate,
+    SystemParams,
+    SystemStatus,
+    VisualSettings,
 )
 from app.utils.helpers import format_file_size
 
@@ -99,7 +101,6 @@ async def save_settings(
 
 async def _upsert_setting(db: AsyncSession, key: str, value: dict):
     """插入或更新设置 (v2.4: 使用 on_conflict 避免竞态条件)"""
-    from sqlalchemy import insert
 
     result = await db.execute(select(SystemSetting).where(SystemSetting.key == key))
     existing = result.scalar_one_or_none()

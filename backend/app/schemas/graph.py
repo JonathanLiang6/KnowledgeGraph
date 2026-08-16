@@ -1,7 +1,6 @@
 """
 知识图谱 Pydantic Schemas
 """
-from typing import Optional, List
 from pydantic import BaseModel
 
 
@@ -27,8 +26,8 @@ class GraphLink(BaseModel):
 
 class GraphData(BaseModel):
     """图谱数据"""
-    nodes: List[GraphNode] = []
-    links: List[GraphLink] = []
+    nodes: list[GraphNode] = []
+    links: list[GraphLink] = []
     legend: dict = {}
 
 
@@ -39,8 +38,8 @@ class EntityDetail(BaseModel):
     type: str
     description: str = ""
     weight: float = 0.0
-    related_entities: List[dict] = []
-    related_documents: List[dict] = []
+    related_entities: list[dict] = []
+    related_documents: list[dict] = []
 
     model_config = {"from_attributes": True}
 
@@ -49,8 +48,8 @@ class EntityDetail(BaseModel):
 
 class GraphPath(BaseModel):
     """实体间路径"""
-    path: List[str] = []
-    relations: List[str] = []
+    path: list[str] = []
+    relations: list[str] = []
     length: int = 0
     total_weight: float = 0.0
 
@@ -59,7 +58,7 @@ class PathsResponse(BaseModel):
     """路径查询响应"""
     source: str
     target: str
-    paths: List[GraphPath] = []
+    paths: list[GraphPath] = []
     count: int = 0
 
 
@@ -67,9 +66,9 @@ class CommunityInfo(BaseModel):
     """社区摘要信息"""
     id: str
     label: str = ""
-    node_ids: List[str] = []
+    node_ids: list[str] = []
     node_count: int = 0
-    top_entities: List[dict] = []
+    top_entities: list[dict] = []
     description: str = ""
 
 
@@ -78,8 +77,8 @@ class CommunityDetail(BaseModel):
     id: str
     label: str = ""
     node_count: int = 0
-    nodes: List[dict] = []
-    edges: List[dict] = []
+    nodes: list[dict] = []
+    edges: list[dict] = []
     description: str = ""
     density: float = 0.0
 
@@ -87,16 +86,16 @@ class CommunityDetail(BaseModel):
 class CommunitiesResponse(BaseModel):
     """社区列表响应"""
     kb_id: str
-    communities: List[CommunityInfo] = []
+    communities: list[CommunityInfo] = []
     count: int = 0
 
 
 class NeighborInfo(BaseModel):
     """实体邻居信息"""
     entity: dict = {}
-    neighbors: List[dict] = []
-    subgraph_nodes: List[dict] = []
-    subgraph_edges: List[dict] = []
+    neighbors: list[dict] = []
+    subgraph_nodes: list[dict] = []
+    subgraph_edges: list[dict] = []
 
 
 class GraphStats(BaseModel):

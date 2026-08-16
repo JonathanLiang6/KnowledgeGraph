@@ -2,7 +2,7 @@
 知识库 Pydantic Schemas
 """
 from datetime import datetime
-from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -14,8 +14,8 @@ class KnowledgeBaseCreate(BaseModel):
 
 class KnowledgeBaseUpdate(BaseModel):
     """更新知识库"""
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    description: Optional[str] = Field(None, max_length=2000)
+    name: str | None = Field(None, min_length=1, max_length=255)
+    description: str | None = Field(None, max_length=2000)
 
 
 class KnowledgeBaseResponse(BaseModel):

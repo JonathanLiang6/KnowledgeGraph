@@ -3,19 +3,18 @@
 
 纯文件系统逻辑，不触碰数据库。
 """
-import pytest
 
+from app.models.document import DocumentStatus
 from app.tasks.document_tasks import (
+    _has_artifact,
+    _load_artifact_json,
+    _load_artifact_text,
     _RestoredChunk,
+    _save_artifact_json,
+    _save_artifact_text,
     cleanup_doc_artifacts,
     get_stage_for_status,
-    _save_artifact_text,
-    _load_artifact_text,
-    _save_artifact_json,
-    _load_artifact_json,
-    _has_artifact,
 )
-from app.models.document import DocumentStatus
 
 
 def test_artifact_text_roundtrip(tmp_path, monkeypatch):

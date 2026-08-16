@@ -3,16 +3,26 @@
 """
 import json
 import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
-from app.core.database import get_db
+
 from app.core.colors import TYPE_COLORS, get_color_for_type, get_legend
+from app.core.database import get_db
 from app.models.document import Document, DocumentStatus
 from app.schemas.graph import (
-    GraphData, GraphNode, GraphLink, EntityDetail,
-    GraphPath, PathsResponse, CommunityInfo, CommunityDetail,
-    CommunitiesResponse, NeighborInfo, GraphStats,
+    CommunitiesResponse,
+    CommunityDetail,
+    CommunityInfo,
+    EntityDetail,
+    GraphData,
+    GraphLink,
+    GraphNode,
+    GraphPath,
+    GraphStats,
+    NeighborInfo,
+    PathsResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -136,7 +146,6 @@ async def get_graph_data(
 ):
     """获取知识图谱数据（Phase 1: 从 GraphEntity/GraphRelation 独立表读取）"""
     from app.services.graph_service import GraphService
-    from app.models.graph_entity import GraphEntity, GraphRelation
 
     # 从独立图存储表加载 NetworkX 图（v4.1 #66: limit 下推到 SQL，
     # 按权重取 Top-N 实体，不再全量加载后内存截断）
@@ -175,7 +184,7 @@ async def get_graph_data(
             weight=node_data.get("weight", 0.5),
             color=color,
         )
-        color_idx += 1
+        color_idx += 1  # noqa: SIM113 — 仅对已加载节点累加，与枚举序不同义
         entity_types.add(etype)
 
     for u, v, edge_data in G.edges(data=True):
@@ -208,7 +217,6 @@ async def get_entity_detail(
 ):
     """获取实体详情（含关联实体和来源文档）— v4.0: 从 GraphEntity/GraphRelation 独立表读取"""
     from app.models.graph_entity import GraphEntity, GraphRelation
-    from app.services.graph_service import GraphService
 
     # 从新表查询实体
     entity_stmt = select(GraphEntity).where(GraphEntity.id == entity_id)
@@ -334,8 +342,6 @@ def _bridge_isolated_nodes(nodes: list, links: list) -> tuple:
     n = len(nodes)
     node_ids = [nd.id for nd in nodes]
     id_to_idx = {nid: i for i, nid in enumerate(node_ids)}
-    name_to_id = {nd.name: nd.id for nd in nodes}
-
     # Union-Find
     parent = list(range(n))
 
@@ -392,8 +398,8 @@ def _bridge_isolated_nodes(nodes: list, links: list) -> tuple:
     # 桥接
     max_new_edges = max(1, n // 3)
     new_edge_count = 0
-    existing_edges = {(l.source, l.target) for l in links}
-    existing_edges.update({(l.target, l.source) for l in links})
+    existing_edges = {(lk.source, lk.target) for lk in links}
+    existing_edges.update({(lk.target, lk.source) for lk in links})
 
     new_links = list(links)
 

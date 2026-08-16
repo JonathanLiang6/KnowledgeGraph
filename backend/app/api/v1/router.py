@@ -2,15 +2,16 @@
 API v1 路由汇总 - 聚合所有子路由 (v3.2: + topology, + analytics)
 """
 from fastapi import APIRouter
+
 from app.api.v1.endpoints import (
-    knowledge_base,
-    document,
-    chat,
-    graph,
-    settings,
-    monitor,
-    topology,
     analytics,
+    chat,
+    document,
+    graph,
+    knowledge_base,
+    monitor,
+    settings,
+    topology,
 )
 
 api_router = APIRouter(prefix="/api/v1")

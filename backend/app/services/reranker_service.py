@@ -2,9 +2,9 @@
 重排序服务 - 使用 BGE-Reranker (Cross-Encoder) 对检索结果二次打分
 v2.4: 线程安全的延迟加载
 """
-import threading
 import logging
-from typing import List
+import threading
+
 from app.core.config import config
 
 logger = logging.getLogger(__name__)
@@ -46,9 +46,9 @@ class RerankerService:
     def rerank(
         cls,
         query: str,
-        chunks: List[dict],
+        chunks: list[dict],
         top_k: int = None,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """
         对 chunks 进行重排序
 
@@ -74,7 +74,7 @@ class RerankerService:
             return cls._fallback_rerank(query, chunks, top_k)
 
     @classmethod
-    def _local_rerank(cls, model, query: str, chunks: List[dict], top_k: int) -> List[dict]:
+    def _local_rerank(cls, model, query: str, chunks: list[dict], top_k: int) -> list[dict]:
         """本地 Cross-Encoder 重排序"""
         # 构建 (query, chunk_text) 对
         pairs = [(query, chunk["text"]) for chunk in chunks]
@@ -95,7 +95,7 @@ class RerankerService:
             return cls._fallback_rerank(query, chunks, top_k)
 
     @classmethod
-    def _fallback_rerank(cls, query: str, chunks: List[dict], top_k: int) -> List[dict]:
+    def _fallback_rerank(cls, query: str, chunks: list[dict], top_k: int) -> list[dict]:
         """
         回退方案：基于文本相似度的简单重排序
         使用 Jaccard 相似度 + 原始检索分数

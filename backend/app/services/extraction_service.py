@@ -3,7 +3,7 @@
 """
 import asyncio
 import logging
-from typing import List, Dict, Optional
+
 from app.services.entity_extractor import NLPEntityExtractor
 from app.services.llm_refiner import LLMEntityRefiner
 
@@ -104,7 +104,7 @@ class ExtractionService:
         return {"nodes": nodes, "links": links, "legend": result.get("legend", {})}
 
     @staticmethod
-    def _denoise(entities: List[dict], relationships: List[dict]) -> tuple:
+    def _denoise(entities: list[dict], relationships: list[dict]) -> tuple:
         """
         动态图谱去噪：
         1. 过滤孤立节点（度 = 0 且权重 < 阈值）

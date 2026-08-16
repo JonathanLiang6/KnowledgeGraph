@@ -5,9 +5,9 @@
 使用内置关键词映射表将实体归类，支持前端 ECharts Treemap 渲染。
 """
 import logging
-from datetime import datetime, timezone
-from typing import List, Dict, Optional
-from sqlalchemy import select, func, and_, case
+from datetime import UTC, datetime
+
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.graph_entity import GraphEntity
@@ -15,7 +15,7 @@ from app.models.graph_entity import GraphEntity
 logger = logging.getLogger(__name__)
 
 # 内置关键词映射表：关键词 → 分类名
-CATEGORY_KEYWORDS: Dict[str, str] = {
+CATEGORY_KEYWORDS: dict[str, str] = {
     # 编程语言
     "Python": "编程语言", "Java": "编程语言", "JavaScript": "编程语言",
     "TypeScript": "编程语言", "C++": "编程语言", "Go": "编程语言",
@@ -118,7 +118,7 @@ class AnalyticsService:
         return "通用/其他"
 
     @staticmethod
-    async def get_kb_coverage(db: AsyncSession, kb_id: str) -> List[dict]:
+    async def get_kb_coverage(db: AsyncSession, kb_id: str) -> list[dict]:
         """
         获取知识库的实体覆盖分析。
 
@@ -134,7 +134,7 @@ class AnalyticsService:
             return []
 
         # 归类聚合
-        category_entities: Dict[str, list] = {}
+        category_entities: dict[str, list] = {}
         for e in entities:
             cat = AnalyticsService._classify_entity(e.name, e.entity_type)
             if cat not in category_entities:
@@ -142,7 +142,7 @@ class AnalyticsService:
             category_entities[cat].append(e)
 
         # 构建返回数据
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         coverage = []
         for cat, ents in category_entities.items():
             # 计算最近更新天数
@@ -151,7 +151,7 @@ class AnalyticsService:
                 default=now,
             )
             if last_updated.tzinfo is None:
-                last_updated = last_updated.replace(tzinfo=timezone.utc)
+                last_updated = last_updated.replace(tzinfo=UTC)
             days = max(0, (now - last_updated).days)
 
             coverage.append({

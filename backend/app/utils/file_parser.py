@@ -3,11 +3,9 @@
 修复：PyPDF2 → pypdf、编码检测、流式读取、容错解析
 v3.2: + ImageParser (PaddleOCR + BLIP Captioning)
 """
-import os
-import io
 import logging
+import os
 from pathlib import Path
-from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +30,7 @@ EXT_TO_TYPE: dict = {
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
-def read_file_content(filepath: str) -> Optional[str]:
+def read_file_content(filepath: str) -> str | None:
     """
     解析文件内容，根据扩展名调用对应的解析器。
     返回文件文本内容，解析失败返回 None。
@@ -87,9 +85,9 @@ def _check_zip_safety(filepath: str) -> None:
     Raises:
         ValueError: 超出安全限制时抛出，由 read_file_content 捕获后拒绝解析
     """
-    from app.core.config import config
-
     import zipfile
+
+    from app.core.config import config
     try:
         with zipfile.ZipFile(filepath) as zf:
             total = sum(info.file_size for info in zf.infolist())
@@ -175,9 +173,9 @@ def _read_pdf(filepath: str) -> str:
     读取 PDF 文件 (v2.4: 仅使用 pypdf, 移除已废弃的 PyPDF2 回退)。
     v4.1: 页数与总文本量设上限。
     """
-    from app.core.config import config
-
     from pypdf import PdfReader
+
+    from app.core.config import config
 
     reader = PdfReader(filepath)
     texts = []
@@ -354,7 +352,7 @@ def _get_blip():
     global _blip_model, _blip_processor
     if _blip_model is None:
         try:
-            from transformers import BlipProcessor, BlipForConditionalGeneration
+            from transformers import BlipForConditionalGeneration, BlipProcessor
             _blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
             _blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
             logger.info("BLIP 图像描述模型加载完成")
@@ -430,7 +428,7 @@ def get_file_info(filepath: str, file_hash: str = None) -> dict:
     path = Path(filepath)
     ext = path.suffix.lower()
 
-    from app.utils.helpers import detect_mime_type, compute_file_hash
+    from app.utils.helpers import compute_file_hash, detect_mime_type
 
     size = path.stat().st_size if path.exists() else 0
     mime = detect_mime_type(filepath)

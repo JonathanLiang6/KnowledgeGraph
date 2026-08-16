@@ -1,9 +1,8 @@
 """
 语义分块服务 - 支持语义分块和父子块架构
 """
-import re
 import logging
-from typing import List, Tuple, Dict, Optional
+import re
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -14,7 +13,7 @@ class Chunk:
     """文档块"""
     id: str
     text: str
-    parent_id: Optional[str] = None       # 父子块架构中指向父块
+    parent_id: str | None = None       # 父子块架构中指向父块
     chunk_level: str = "child"            # "parent" or "child"
     metadata: dict = field(default_factory=dict)
 
@@ -47,14 +46,14 @@ class SemanticChunker:
         self.chunk_overlap = chunk_overlap
         self.strategy = strategy
 
-    def chunk(self, text: str, doc_id: str = "") -> List[Chunk]:
+    def chunk(self, text: str, doc_id: str = "") -> list[Chunk]:
         """对文本分块，返回 Chunk 列表"""
         if self.strategy == "parent_child":
             return self._parent_child_chunk(text, doc_id)
         else:
             return self._sentence_chunk(text, doc_id)
 
-    def _parent_child_chunk(self, text: str, doc_id: str) -> List[Chunk]:
+    def _parent_child_chunk(self, text: str, doc_id: str) -> list[Chunk]:
         """
         父子块架构：
         - 父块：较大的上下文窗口，用于 LLM 回答
@@ -128,7 +127,7 @@ class SemanticChunker:
         logger.info(f"父子分块完成: {len(parent_chunks)} 父块, {child_idx} 子块")
         return chunks
 
-    def _sentence_chunk(self, text: str, doc_id: str) -> List[Chunk]:
+    def _sentence_chunk(self, text: str, doc_id: str) -> list[Chunk]:
         """基于句子的简单分块"""
         sentences = self._split_sentences(text)
         chunks = []
@@ -161,14 +160,14 @@ class SemanticChunker:
         return chunks
 
     @staticmethod
-    def _split_sentences(text: str) -> List[str]:
+    def _split_sentences(text: str) -> list[str]:
         """按中英文句子边界分割"""
         # 匹配中英文句子结束符
         sentences = re.split(r'(?<=[。！？.!?\n])\s*', text)
         return [s for s in sentences if s.strip()]
 
     @staticmethod
-    def _split_paragraphs(text: str) -> List[str]:
+    def _split_paragraphs(text: str) -> list[str]:
         """按段落分割（双换行或 Markdown 标题边界）"""
         # 先在标题前分割
         parts = re.split(r'(\n#{1,6}\s)', text)
@@ -189,7 +188,7 @@ class SemanticChunker:
         return result
 
     @staticmethod
-    def get_parent_text(child_chunk: Chunk, all_chunks: List[Chunk]) -> str:
+    def get_parent_text(child_chunk: Chunk, all_chunks: list[Chunk]) -> str:
         """给定子块，返回父块的完整文本"""
         if child_chunk.parent_id:
             for chunk in all_chunks:

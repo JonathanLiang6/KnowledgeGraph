@@ -3,15 +3,14 @@ Embedding 服务 - v2.1 自包含实现
 仅依赖 torch + tokenizers（纯 Rust），零 scipy/sklearn/transformers 依赖。
 解决 Windows 下 scipy C 扩展 ABI 不兼容问题。
 """
-import os
 import json
 import logging
+import os
 import threading
-from typing import List, Optional
-import numpy as np
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: N812 — 社区惯例（PyTorch 官方文档同款写法）
 from tokenizers import Tokenizer
 
 from app.core.config import config
@@ -47,7 +46,6 @@ class BertSelfAttention(nn.Module):
 
     def forward(self, hidden_states: torch.Tensor, attention_mask: torch.Tensor):
         batch_size = hidden_states.size(0)
-        seq_len = hidden_states.size(1)
 
         def reshape(x):
             return x.view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
@@ -205,7 +203,7 @@ def _load_model():
 
         # 加载配置
         config_path = os.path.join(model_path, "config.json")
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             cfg = json.load(f)
 
         logger.info(f"加载 Embedding 模型: {MODEL_NAME} (dim={cfg['hidden_size']})")
@@ -266,7 +264,7 @@ def _load_model():
 
         # v4.1 (#51): EMBEDDING_DIM 配置接线 — 与模型实际维度不一致时告警
         # （向量索引维度以模型实际输出为准，配置仅作声明性校验）
-        if config.EMBEDDING_DIM and config.EMBEDDING_DIM != _embedding_model["dim"]:
+        if config.EMBEDDING_DIM and _embedding_model["dim"] != config.EMBEDDING_DIM:
             logger.warning(
                 f"EMBEDDING_DIM 配置为 {config.EMBEDDING_DIM}，"
                 f"但模型 {MODEL_NAME} 实际维度为 {_embedding_model['dim']}，"
@@ -296,7 +294,7 @@ class EmbeddingService:
     """
 
     @classmethod
-    def encode(cls, texts: List[str]) -> List[List[float]]:
+    def encode(cls, texts: list[str]) -> list[list[float]]:
         """
         对文本列表生成向量（同步，用于非 async 上下文）。
 
@@ -347,20 +345,21 @@ class EmbeddingService:
         return all_embeddings
 
     @classmethod
-    async def encode_async(cls, texts: List[str]) -> List[List[float]]:
+    async def encode_async(cls, texts: list[str]) -> list[list[float]]:
         """
         异步编码（在线程池中执行，避免阻塞事件循环）。
         """
         if not texts:
             return []
         import asyncio
+
         from app.core.cpu_pool import get_cpu_pool
         loop = asyncio.get_running_loop()
         # v4.1 (#51): 使用专用 CPU 线程池（受 CPU_WORKER_THREADS 配置约束）
         return await loop.run_in_executor(get_cpu_pool(), cls.encode, texts)
 
     @classmethod
-    async def encode_single_async(cls, text: str) -> List[float]:
+    async def encode_single_async(cls, text: str) -> list[float]:
         """单文本异步编码（不阻塞事件循环）"""
         if not text:
             return []
@@ -368,7 +367,7 @@ class EmbeddingService:
         return results[0] if results else []
 
     @classmethod
-    def encode_single(cls, text: str) -> List[float]:
+    def encode_single(cls, text: str) -> list[float]:
         """单文本编码"""
         results = cls.encode([text])
         return results[0] if results else []

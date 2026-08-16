@@ -18,14 +18,15 @@ import os
 import shutil
 import traceback
 from datetime import datetime
-from typing import Optional, Dict, Callable, Awaitable
-from sqlalchemy.ext.asyncio import AsyncSession
+
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.v1.endpoints.monitor import create_task, update_task
 from app.core.database import async_session_factory
 from app.models.document import Document, DocumentStatus
-from app.api.v1.endpoints.monitor import create_task, update_task
 from app.utils.file_parser import read_file_content
-from app.utils.helpers import count_tokens_approximate, Timer
+from app.utils.helpers import Timer, count_tokens_approximate
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +78,12 @@ def _save_artifact_text(doc_id: str, name: str, text: str) -> None:
         logger.warning(f"保存阶段产物失败 [{name}] doc={doc_id}: {e}")
 
 
-def _load_artifact_text(doc_id: str, name: str) -> Optional[str]:
+def _load_artifact_text(doc_id: str, name: str) -> str | None:
     path = os.path.join(_artifacts_dir(doc_id), name)
     if not os.path.exists(path):
         return None
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return f.read()
     except OSError:
         return None
@@ -103,7 +104,7 @@ def _load_artifact_json(doc_id: str, name: str):
     if not os.path.exists(path):
         return None
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return None
@@ -284,7 +285,7 @@ async def _process_document(doc_id: str, filepath: str, task_id: str):
                     # 每个阶段完成后立即提交，持久化进度
                     await db.commit()
 
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.error(f"阶段 [{stage_key}] 超时 ({stage_timeout}s)")
                     update_task(task_id, status="failed", error=f"阶段 [{stage_key}] 超时", stage=label)
                     raise
@@ -413,7 +414,7 @@ async def _stage_nlp_extract(
 async def _stage_llm_refine(
     db: AsyncSession, doc: Document, content: str,
     nlp_graph: dict, task_id: str
-) -> Optional[dict]:
+) -> dict | None:
     """
     Stage 3: LLM 精炼实体 (v2.5: 复用 parsing 阶段读取的内容)。
 
@@ -442,7 +443,7 @@ async def _stage_llm_refine(
 
 async def _stage_chunking(
     db: AsyncSession, doc: Document, content: str,
-    refined_graph: Optional[dict], task_id: str
+    refined_graph: dict | None, task_id: str
 ) -> list:
     """
     Stage 4: 语义分块 (v2.5: 复用 parsing 阶段读取的内容)。
@@ -514,7 +515,6 @@ async def _stage_indexing(
     update_task(task_id, progress=90, stage="构建检索索引")
 
     from app.services.embedding_service import EmbeddingService
-    from app.services.hybrid_search import HybridSearchService
 
     child_chunks = [c for c in chunks if c.chunk_level == "child"]
     if not child_chunks:

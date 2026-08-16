@@ -56,10 +56,7 @@ def _is_punctuation(char: str) -> bool:
     # 全角标点 (U+FF00-U+FF0F, U+FF1A-U+FF20, U+FF3B-U+FF40, U+FF5B-U+FF65)
     if 0xFF01 <= cp <= 0xFF0F or 0xFF1A <= cp <= 0xFF20:
         return True
-    if 0xFF3B <= cp <= 0xFF40 or 0xFF5B <= cp <= 0xFF65:
-        return True
-
-    return False
+    return 0xFF3B <= cp <= 0xFF40 or 0xFF5B <= cp <= 0xFF65
 
 
 # ── 字符分类 ──────────────────────────────────────────

@@ -3,33 +3,38 @@
 P0: 文件大小限制、MIME 白名单、流式写入、去重
 P2: 批量上传、重新处理、去重检测
 """
+import logging
 import os
 import uuid
-import logging
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from app.core.database import get_db
+
 from app.core.config import config
+from app.core.database import get_db
 from app.models.document import Document, DocumentStatus
 from app.models.knowledge_base import KnowledgeBase
 from app.schemas.document import (
-    DocumentResponse,
-    DocumentListResponse,
-    DocumentUploadResponse,
-    DocumentStats,
-    BatchUploadResponse,
     BatchUploadItem,
+    BatchUploadResponse,
+    DedupCheckResponse,
+    DocumentListResponse,
+    DocumentResponse,
+    DocumentStats,
+    DocumentUploadResponse,
     ReprocessRequest,
     ReprocessResponse,
-    DedupCheckResponse,
 )
 from app.utils.file_parser import get_file_info
 from app.utils.helpers import (
-    format_file_size, ensure_dir, sanitize_filename,
-    detect_mime_type, validate_file_allowed,
-    stream_save_upload, compute_file_hash,
+    compute_file_hash,
+    detect_mime_type,
+    ensure_dir,
+    format_file_size,
+    sanitize_filename,
+    stream_save_upload,
+    validate_file_allowed,
 )
 
 logger = logging.getLogger(__name__)
@@ -179,7 +184,6 @@ async def upload_document(
     _validate_saved_file(stored_path, raw_filename)
 
     # P0: 文件去重检查 (v2.3: DB查询替代磁盘扫描)
-    duplicate_of = None
     if config.ENABLE_FILE_DEDUP:
         file_hash_val = compute_file_hash(stored_path)
         dup_doc_result = await db.execute(
@@ -248,7 +252,7 @@ async def upload_document(
 
 @router.post("/upload/batch", response_model=BatchUploadResponse)
 async def batch_upload_documents(
-    files: List[UploadFile] = File(...),
+    files: list[UploadFile] = File(...),
     kb_id: str = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
@@ -286,7 +290,7 @@ async def batch_upload_documents(
             safe_filename = f"{uuid.uuid4().hex[:8]}_{sanitize_filename(raw_filename)}"
             stored_path = os.path.join(upload_dir, safe_filename)
 
-            total_written = stream_save_upload(file.file, stored_path)
+            stream_save_upload(file.file, stored_path)
             await file.close()
 
             # MIME 校验
@@ -506,8 +510,9 @@ async def delete_document(
 
     # v4.1: 清理该文档贡献的图谱数据（关系按来源删除；共享实体仅移除本来源记录）
     try:
-        from app.models.graph_entity import GraphEntity, GraphRelation
         from sqlalchemy import delete as sa_delete
+
+        from app.models.graph_entity import GraphEntity, GraphRelation
         await db.execute(sa_delete(GraphRelation).where(GraphRelation.source_doc_id == doc_id))
         ent_result = await db.execute(select(GraphEntity).where(GraphEntity.kb_id == doc.kb_id))
         for entity in ent_result.scalars():
@@ -553,7 +558,6 @@ async def get_document_stats(db: AsyncSession = Depends(get_db)):
     获取文档统计信息 (v2.5: SQL 聚合，避免全量加载到 Python)。
     """
     # v2.5: 使用数据库聚合计算，O(1) 网络传输
-    from sqlalchemy import case, and_
 
     # 处理中状态: 排除 done/failed/pending
     processing_statuses = ["parsing", "nlp_extracting", "llm_refining",

@@ -1,7 +1,7 @@
 """
 颜色模块单元测试 — 验证 fallback 一致性
 """
-from app.core.colors import get_color_for_type, get_legend, TYPE_COLORS, FALLBACK_COLORS
+from app.core.colors import FALLBACK_COLORS, TYPE_COLORS, get_color_for_type, get_legend
 
 
 def test_type_colors_not_empty():

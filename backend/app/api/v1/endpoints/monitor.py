@@ -2,13 +2,14 @@
 系统监控 API - 任务进度查询、系统状态
 v3.1: 任务 TTL 自动清理 + 线程安全 + 版本号从 config 读取
 """
-import time
-import threading
 import logging
+import threading
+import time
 from datetime import datetime
-from typing import Dict, Optional
+
 from fastapi import APIRouter
-from app.core.config import config, APP_VERSION
+
+from app.core.config import APP_VERSION, config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/monitor", tags=["系统监控"])
@@ -17,7 +18,7 @@ router = APIRouter(prefix="/monitor", tags=["系统监控"])
 TASK_TTL_SECONDS = 3600  # 1小时
 
 # 内存任务存储 + threading.Lock 保护
-_task_store: Dict[str, dict] = {}
+_task_store: dict[str, dict] = {}
 _task_store_lock = threading.Lock()
 
 

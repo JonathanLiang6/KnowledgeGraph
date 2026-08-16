@@ -9,9 +9,8 @@ v3.2: kb_id 隔离 — 存储 Key 统一加 kb_id 前缀，确保不同知识库
 v4.0: 添加 asyncio.Lock 保护 _session_memories 并发访问
 """
 import asyncio
-import time
 import logging
-from typing import List, Dict, Optional, Tuple
+import time
 from dataclasses import dataclass, field
 
 from app.core.config import config
@@ -42,9 +41,9 @@ class WorkingMemory:
     """
 
     def __init__(self):
-        self.steps: List[AgentStep] = []
+        self.steps: list[AgentStep] = []
         self.final_answer: str = ""
-        self._scratchpad: List[str] = []
+        self._scratchpad: list[str] = []
         # v4.0: 从配置读取最大步数，确保与 Agent 配置同步
         # v4.1 (#81): 移除强制下限 10 — 直接使用配置值，与 Agent 循环步数保持一致
         self.max_steps = config.AGENT_MAX_STEPS
@@ -61,7 +60,7 @@ class WorkingMemory:
         if len(self._scratchpad) > 20:
             self._scratchpad = self._scratchpad[-20:]
 
-    def get_scratchpad(self) -> List[str]:
+    def get_scratchpad(self) -> list[str]:
         """获取草稿内容"""
         return list(self._scratchpad)
 
@@ -99,7 +98,7 @@ class EpisodicMemory:
 
     def __init__(self, max_turns: int = 5):
         self.max_turns = max_turns
-        self.turns: List[Dict[str, str]] = []
+        self.turns: list[dict[str, str]] = []
 
     def add_turn(self, user_query: str, answer: str):
         """记录一轮对话"""
@@ -127,7 +126,7 @@ class EpisodicMemory:
 # ── v3.2: kb_id 隔离 ─────────────────────────────────────────────
 # 存储 key: "{kb_id}::{session_id}" → (WorkingMemory, EpisodicMemory, last_access_ts)
 # 当 kb_id 为空时使用 "__global__" 作为前缀
-_session_memories: Dict[str, Tuple[WorkingMemory, EpisodicMemory, float]] = {}
+_session_memories: dict[str, tuple[WorkingMemory, EpisodicMemory, float]] = {}
 # v4.0: 并发保护锁
 _session_lock = asyncio.Lock()
 

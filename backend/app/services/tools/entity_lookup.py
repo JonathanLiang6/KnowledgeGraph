@@ -1,5 +1,6 @@
 """实体查询工具"""
 import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -21,9 +22,10 @@ async def entity_lookup(
     Returns:
         格式化的实体信息文本
     """
+    from sqlalchemy import select
+
     from app.models.graph_entity import GraphEntity
     from app.services.graph_service import GraphService
-    from sqlalchemy import select
 
     # 精确匹配优先
     stmt = select(GraphEntity).where(

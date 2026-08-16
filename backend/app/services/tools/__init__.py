@@ -6,12 +6,12 @@ Agent 工具集 — Phase 2 Agentic RAG + v3.2 扩展
 
 v3.2: + web_search (Q8), + analyze_coverage (Q9)
 """
-from .vector_search import vector_search
-from .graph_traverse import graph_traverse
-from .entity_lookup import entity_lookup
-from .bm25_search import bm25_search
-from .web_search import web_search
 from .analyze_coverage import analyze_coverage
+from .bm25_search import bm25_search
+from .entity_lookup import entity_lookup
+from .graph_traverse import graph_traverse
+from .vector_search import vector_search
+from .web_search import web_search
 
 # 工具注册表 — Agent 通过此表发现可用工具
 TOOL_REGISTRY = {

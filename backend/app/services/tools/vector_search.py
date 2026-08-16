@@ -1,6 +1,6 @@
 """向量检索工具"""
 import logging
-from typing import List
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -24,8 +24,8 @@ async def vector_search(
     Returns:
         格式化的检索结果文本
     """
-    from app.services.hybrid_search import hybrid_search_service
     from app.services.embedding_service import EmbeddingService
+    from app.services.hybrid_search import hybrid_search_service
 
     # v4.0: 使用纯向量检索（不经过 GraphRAG 增强，让 Agent 自行决定是否调用图遍历）
     try:

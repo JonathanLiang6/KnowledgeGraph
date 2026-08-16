@@ -8,9 +8,10 @@ APP_VERSION = "4.0.0"
 
 # API 密钥占位符前缀 — 以此前缀开头的视为未配置
 _API_KEY_PLACEHOLDER_PREFIX = "your-"
-import os
 import logging
+import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)

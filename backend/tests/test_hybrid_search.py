@@ -6,6 +6,7 @@ v4.1: kb_id 知识库隔离 + 旧 schema 自动迁移 + 加权 RRF
 import os
 import sqlite3
 import tempfile
+
 from app.services.hybrid_search import FTS5Index
 
 
@@ -168,6 +169,7 @@ def test_fts5_old_schema_migration():
 def test_full_migration_rebuilds_fts_with_kb_id(tmp_path, monkeypatch):
     """#46: 旧 LanceDB + 旧 FTS5 schema → 服务初始化自动迁移并从 DB 反查 kb_id 回填重建"""
     import lancedb as lancedb_lib
+
     from app.core.config import config
     from app.services.hybrid_search import HybridSearchService
 

@@ -11,19 +11,23 @@ Agent 自主决策：规划 → 调用工具 → 观察结果 → 反思 → 生
                   ↓ (信息充分)
             [Final Answer]
 """
-import re
 import json
 import logging
-from typing import AsyncGenerator, Optional, Dict, Any
+import re
+from typing import Any, AsyncGenerator
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import config
 from app.services.deepseek_client import DeepSeekClient
-from app.services.tools import TOOL_REGISTRY, get_tools_description
 from app.services.memory_service import (
-    WorkingMemory, EpisodicMemory, AgentStep,
-    get_session_memory, clear_session_memory,
+    AgentStep,
+    EpisodicMemory,
+    WorkingMemory,
+    clear_session_memory,
+    get_session_memory,
 )
+from app.services.tools import TOOL_REGISTRY, get_tools_description
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +144,7 @@ class ReActAgent:
     async def run(
         self,
         user_query: str,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """
         执行 ReAct Agent 循环，yield SSE 事件。
 

@@ -4,15 +4,14 @@ v4.1: kb_id 知识库隔离（向量/FTS5 双路过滤 + 旧 schema 自动迁移
 v4.0: FTS5 替代 rank-bm25 — 真正增量更新，零额外依赖
 v3.1: 统一 RRF 融合算法（标准 Reciprocal Rank Fusion, k=60）
 """
+import logging
 import os
 import re
 import sqlite3
 import threading
-import logging
-from typing import List, Tuple, Optional, Dict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
 from cachetools import LRUCache
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +22,7 @@ class SearchResult:
     chunk_id: str
     text: str
     score: float
-    parent_text: Optional[str] = None
+    parent_text: str | None = None
     source: str = ""  # "vector", "bm25", "fusion"
 
 
@@ -35,10 +34,10 @@ class Tokenizer:
     优先使用 jieba，失败时回退到字符级分词。
     """
 
-    _jieba_available: Optional[bool] = None
+    _jieba_available: bool | None = None
 
     @classmethod
-    def tokenize(cls, text: str) -> List[str]:
+    def tokenize(cls, text: str) -> list[str]:
         """
         对文本进行分词。
 
@@ -59,7 +58,7 @@ class Tokenizer:
         return cls._jieba_tokenize(text)
 
     @classmethod
-    def _jieba_tokenize(cls, text: str) -> List[str]:
+    def _jieba_tokenize(cls, text: str) -> list[str]:
         """jieba 分词，带错误恢复"""
         if cls._jieba_available is None:
             cls._check_jieba()
@@ -87,7 +86,7 @@ class Tokenizer:
             cls._jieba_available = False
 
     @staticmethod
-    def _fallback_tokenize(text: str) -> List[str]:
+    def _fallback_tokenize(text: str) -> list[str]:
         """回退分词：中文字符级 + 英文词级"""
         import re
         tokens = []
@@ -135,7 +134,7 @@ class FTS5Index:
             db_path = os.path.join(config.DATA_DIR, "knowledge_graph.db")
         self._db_path = db_path
         self._table_name = "fts_chunks"
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         # #60: 连接被多线程共享（check_same_thread=False），操作必须持锁串行化
         self._lock = threading.RLock()
         # #46: 旧 schema（无 kb_id 列）迁移标志 — 上层据此触发全量回填
@@ -182,7 +181,7 @@ class FTS5Index:
             """)
             conn.commit()
 
-    def _existing_columns(self, conn: sqlite3.Connection) -> List[str]:
+    def _existing_columns(self, conn: sqlite3.Connection) -> list[str]:
         """读取现有表结构的列名；表不存在或读取失败返回 []"""
         try:
             rows = conn.execute(f"PRAGMA table_info({self._table_name})").fetchall()
@@ -190,7 +189,7 @@ class FTS5Index:
         except sqlite3.Error:
             return []
 
-    def add(self, docs: List[Tuple]):
+    def add(self, docs: list[tuple]):
         """
         增量添加文档到 FTS5 索引。
 
@@ -218,8 +217,8 @@ class FTS5Index:
         self,
         query: str,
         top_k: int = 10,
-        kb_id: Optional[str] = None,
-    ) -> List[Tuple[str, float]]:
+        kb_id: str | None = None,
+    ) -> list[tuple[str, float]]:
         """
         FTS5 BM25 搜索。
 
@@ -356,7 +355,7 @@ class LanceDBStore:
         self._table = None
         self._table_name = "chunks"
         # #46: 旧 schema 迁移暂存记录（create_or_open_table 检测到旧表时填充）
-        self.pending_migration_records: List[dict] = []
+        self.pending_migration_records: list[dict] = []
 
     def create_or_open_table(self, table_name: str = "chunks"):
         """
@@ -394,7 +393,7 @@ class LanceDBStore:
         count = self._table.count_rows() if hasattr(self._table, 'count_rows') else "?"
         logger.info(f"LanceDB 表已打开: {table_name} (rows={count})")
 
-    def _get_column_names(self) -> List[str]:
+    def _get_column_names(self) -> list[str]:
         """读取当前表的列名；表未打开或读取失败返回 []"""
         if self._table is None:
             return []
@@ -404,7 +403,7 @@ class LanceDBStore:
             logger.debug(f"LanceDB schema 读取失败，跳过迁移检查: {e}")
             return []
 
-    def add(self, chunks: List[dict], embeddings: List[List[float]]):
+    def add(self, chunks: list[dict], embeddings: list[list[float]]):
         """
         批量添加向量记录。
 
@@ -412,7 +411,6 @@ class LanceDBStore:
             chunks: 文档块列表（含 id, text, parent_id, kb_id 等）
             embeddings: 对应的向量列表
         """
-        import pyarrow as pa
 
         if not chunks:
             return
@@ -432,7 +430,7 @@ class LanceDBStore:
         self._add_raw_records(records)
         logger.info(f"LanceDB 添加 {len(records)} 条向量记录到 {self._table_name}")
 
-    def _add_raw_records(self, records: List[dict]):
+    def _add_raw_records(self, records: list[dict]):
         """写入完整记录 dict（含 vector/kb_id）— 常规 add 与 schema 迁移回填共用"""
         if not records:
             return
@@ -444,10 +442,10 @@ class LanceDBStore:
 
     def search(
         self,
-        query_vector: List[float],
+        query_vector: list[float],
         top_k: int = 20,
-        kb_id: Optional[str] = None,
-    ) -> List[dict]:
+        kb_id: str | None = None,
+    ) -> list[dict]:
         """
         向量检索。
 
@@ -480,7 +478,7 @@ class LanceDBStore:
             logger.error(f"LanceDB 搜索失败: {e}")
             return []
 
-    def get_all_chunks(self) -> List[dict]:
+    def get_all_chunks(self) -> list[dict]:
         """获取所有已索引的块"""
         if self._table is None:
             return []
@@ -594,7 +592,7 @@ class HybridSearchService:
             logger.info("检测到旧索引 schema，已从向量库全量重建 FTS5 索引（含 kb_id）")
 
     @staticmethod
-    def _load_doc_to_kb_map() -> Dict[str, str]:
+    def _load_doc_to_kb_map() -> dict[str, str]:
         """
         从 SQLite documents 表读取 doc_id → kb_id 映射（迁移回填用）。
 
@@ -603,7 +601,7 @@ class HybridSearchService:
         """
         from app.core.config import config
         db_path = os.path.join(config.DATA_DIR, "knowledge_graph.db")
-        mapping: Dict[str, str] = {}
+        mapping: dict[str, str] = {}
         if not os.path.exists(db_path):
             return mapping
         conn = sqlite3.connect(db_path)
@@ -618,9 +616,9 @@ class HybridSearchService:
 
     def index_document(
         self,
-        chunks: List[dict],
-        embeddings: List[List[float]],
-        kb_id: Optional[str] = None,
+        chunks: list[dict],
+        embeddings: list[list[float]],
+        kb_id: str | None = None,
     ):
         """
         对新文档建立索引（LanceDB 向量 + FTS5 增量关键词）。
@@ -683,10 +681,10 @@ class HybridSearchService:
     def search(
         self,
         query: str,
-        query_vector: List[float],
+        query_vector: list[float],
         top_k: int = 20,
-        kb_id: Optional[str] = None,
-    ) -> List[SearchResult]:
+        kb_id: str | None = None,
+    ) -> list[SearchResult]:
         """
         混合检索：LanceDB 向量 + FTS5 BM25 → 加权 RRF 融合。
 
@@ -706,7 +704,7 @@ class HybridSearchService:
 
         # 1. 向量检索（#46: kb_id 过滤）
         vector_results_raw = self.vector_store.search(query_vector, top_k=top_k * 2, kb_id=kb_id)
-        vector_results: List[SearchResult] = []
+        vector_results: list[SearchResult] = []
         vector_ids: set = set()
         for r in vector_results_raw:
             vid = r["id"]
@@ -723,7 +721,7 @@ class HybridSearchService:
 
         # 2. FTS5 BM25 检索（v4.0: 真正增量索引；#46: kb_id 过滤）
         bm25_raw = self.bm25_index.search(query, top_k=top_k * 2, kb_id=kb_id)
-        bm25_results: List[SearchResult] = []
+        bm25_results: list[SearchResult] = []
         for doc_id, score in bm25_raw:
             if doc_id not in vector_ids:
                 data = self._all_chunks_cache.get(doc_id, {})
@@ -788,10 +786,10 @@ hybrid_search_service = HybridSearchService()
 # 所有检索融合（向量+BM25、混合+图检索）都调用此函数
 
 def rrf_fusion(
-    result_sets: List[List[SearchResult]],
+    result_sets: list[list[SearchResult]],
     k: int = 60,
-    weights: Optional[List[float]] = None,
-) -> List[SearchResult]:
+    weights: list[float] | None = None,
+) -> list[SearchResult]:
     """
     Reciprocal Rank Fusion — 融合多路检索结果（#62: 支持加权）。
 
@@ -819,8 +817,8 @@ def rrf_fusion(
         )
         weights = [1.0] * len(result_sets)
 
-    chunk_scores: Dict[str, float] = {}
-    chunk_data: Dict[str, SearchResult] = {}
+    chunk_scores: dict[str, float] = {}
+    chunk_data: dict[str, SearchResult] = {}
 
     for results, weight in zip(result_sets, weights):
         for rank, r in enumerate(results, start=1):

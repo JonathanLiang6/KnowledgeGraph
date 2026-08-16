@@ -1,6 +1,6 @@
 """BM25 关键词检索工具"""
 import logging
-from typing import List
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)

@@ -34,7 +34,7 @@ export function chatCompletionsStream(data, onChunk, onDone, onError, onAgentEve
       const decoder = new TextDecoder()
       let lineBuffer = ''
 
-      while (true) {
+      for (;;) { // eslint-disable-line no-constant-condition
         const { done, value } = await reader.read()
         if (done) break
 

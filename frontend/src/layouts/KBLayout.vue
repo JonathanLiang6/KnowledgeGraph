@@ -1,60 +1,63 @@
 <template>
-  <div class="kb-layout">
-    <!-- 知识库上下文头部 -->
-    <header class="kb-header">
-      <div class="kb-header-left">
-        <button class="back-btn btn-ghost" @click="$router.push('/')">
-          <el-icon :size="16" class="back-arrow"><ArrowLeft /></el-icon>
-          <span>返回</span>
+  <div class="kb-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
+    <!-- 左侧导航栏 -->
+    <aside class="kb-sidebar">
+      <!-- 折叠切换按钮（侧边栏右侧边缘，垂直居中） -->
+      <button class="collapse-btn" @click="sidebarCollapsed = !sidebarCollapsed" :title="sidebarCollapsed ? '展开导航' : '收起导航'">
+        <el-icon :size="18" class="collapse-icon" :class="{ flipped: !sidebarCollapsed }"><ArrowRight /></el-icon>
+      </button>
+
+      <!-- 知识库头部 -->
+      <div class="sidebar-header" v-if="kb">
+        <div class="kb-icon-wrap">
+          <BrainGraphLogo :size="44" variant="green" />
+        </div>
+        <div class="kb-info" v-if="!sidebarCollapsed">
+          <h1 class="kb-name">{{ kb.name }}</h1>
+          <div class="kb-meta">
+            <span class="meta-dot" />
+            <span>{{ kb.document_count }} 篇文档</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-header sidebar-loading" v-else-if="loading">
+        <el-skeleton :rows="2" animated />
+      </div>
+
+      <!-- 导航项 -->
+      <nav class="sidebar-nav" v-if="kb">
+        <router-link :to="`/kb/${kbId}/graph`" class="nav-item" active-class="active">
+          <el-icon :size="18" class="nav-icon"><Share /></el-icon>
+          <span class="nav-label" v-if="!sidebarCollapsed">知识图谱</span>
+        </router-link>
+        <router-link :to="`/kb/${kbId}/chat`" class="nav-item" active-class="active">
+          <el-icon :size="18" class="nav-icon"><ChatDotRound /></el-icon>
+          <span class="nav-label" v-if="!sidebarCollapsed">智能问答</span>
+        </router-link>
+        <router-link :to="`/kb/${kbId}/documents`" class="nav-item" active-class="active">
+          <el-icon :size="18" class="nav-icon"><Document /></el-icon>
+          <span class="nav-label" v-if="!sidebarCollapsed">文档管理</span>
+        </router-link>
+        <router-link :to="`/kb/${kbId}/coverage`" class="nav-item" active-class="active">
+          <el-icon :size="18" class="nav-icon"><DataAnalysis /></el-icon>
+          <span class="nav-label" v-if="!sidebarCollapsed">知识体检</span>
+        </router-link>
+      </nav>
+
+      <!-- 分隔线 -->
+      <div class="sidebar-divider" v-if="kb && !sidebarCollapsed" />
+
+      <!-- 返回首页（最底部） -->
+      <div class="sidebar-bottom" v-if="kb">
+        <button class="tool-item" @click="$router.push('/')" :title="sidebarCollapsed ? '返回首页' : ''">
+          <el-icon :size="18" class="tool-icon"><ArrowLeft /></el-icon>
+          <span class="tool-label" v-if="!sidebarCollapsed">返回首页</span>
         </button>
-        <div class="kb-title" v-if="kb">
-          <el-icon :size="20" color="var(--color-primary)"><Collection /></el-icon>
-          <h1>{{ kb.name }}</h1>
-          <span class="kb-doc-count" v-if="kb.document_count > 0">
-            <span class="count-dot" />
-            {{ kb.document_count }} 篇文档
-          </span>
-        </div>
-        <div class="kb-title skeleton-title" v-else-if="loading">
-          <span class="skeleton" style="width:200px;height:28px" />
-        </div>
-        <div class="kb-title" v-else-if="error">
-          <el-result icon="error" title="知识库不存在" sub-title="请检查链接或返回首页">
-            <template #extra>
-              <el-button type="primary" @click="$router.push('/')">返回首页</el-button>
-            </template>
-          </el-result>
-        </div>
       </div>
-    </header>
+    </aside>
 
-    <!-- 子导航标签 -->
-    <nav class="kb-nav" v-if="kb">
-      <div class="nav-inner">
-        <router-link :to="`/kb/${kbId}/graph`" class="nav-tab" active-class="active">
-          <el-icon :size="16"><Share /></el-icon>
-          <span>知识图谱</span>
-        </router-link>
-        <router-link :to="`/kb/${kbId}/chat`" class="nav-tab" active-class="active">
-          <el-icon :size="16"><ChatDotRound /></el-icon>
-          <span>智能问答</span>
-        </router-link>
-        <router-link :to="`/kb/${kbId}/documents`" class="nav-tab" active-class="active">
-          <el-icon :size="16"><Document /></el-icon>
-          <span>文档管理</span>
-        </router-link>
-        <!-- 滑动指示器 -->
-        <div class="nav-indicator" ref="navIndicator" />
-        <!-- v3.2: 知识体检按钮 -->
-        <div class="nav-extra">
-          <el-button size="small" text @click="openCoverageDialog">
-            📊 知识体检
-          </el-button>
-        </div>
-      </div>
-    </nav>
-
-    <!-- 子页面内容 -->
+    <!-- 内容区 -->
     <main class="kb-main">
       <template v-if="kb">
         <router-view v-slot="{ Component }">
@@ -63,331 +66,358 @@
           </transition>
         </router-view>
       </template>
+      <template v-else-if="error">
+        <div class="error-state">
+          <el-result icon="error" title="知识库不存在" sub-title="请检查链接或返回首页">
+            <template #extra>
+              <el-button type="primary" @click="$router.push('/')">返回首页</el-button>
+            </template>
+          </el-result>
+        </div>
+      </template>
     </main>
 
-    <!-- v3.2: 知识体检弹窗 -->
-    <el-dialog
-      v-model="showCoverage"
-      title="📊 知识覆盖体检"
-      width="700px"
-      destroy-on-close
-    >
-      <div v-if="coverageLoading" style="text-align:center;padding:40px">
-        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-        <p style="margin-top:12px;color:var(--text-secondary)">分析中...</p>
-      </div>
-      <div v-else-if="coverageError" style="text-align:center;padding:40px;color:var(--color-danger)">
-        {{ coverageError }}
-      </div>
-      <div v-else-if="coverageData">
-        <div class="coverage-summary">
-          <span>{{ coverageData.total_entities }} 个实体</span>
-          <span>·</span>
-          <span>{{ coverageData.category_count }} 个分类</span>
-        </div>
-        <div ref="chartRef" style="width:100%;height:380px;margin-top:16px" />
-      </div>
-      <div v-else style="text-align:center;padding:40px;color:var(--text-tertiary)">
-        暂无数据
-      </div>
-    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, inject, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { getKnowledgeBase } from '../api/knowledgeBase'
-import { ArrowLeft, Collection, Document, Share, ChatDotRound, Loading } from '@element-plus/icons-vue'
-import api from '../api'
-import * as echarts from 'echarts'
+import { ArrowRight, Document, Share, ChatDotRound, DataAnalysis, ArrowLeft } from '@element-plus/icons-vue'
+import BrainGraphLogo from '../components/BrainGraphLogo.vue'
 
 const route = useRoute()
+const pageTransition = inject('pageTransition', null)
 const kbId = computed(() => route.params.id)
 const kb = ref(null)
 const loading = ref(true)
 const error = ref(false)
-const navIndicator = ref(null)
-
-// v3.2: 知识体检
-const showCoverage = ref(false)
-const coverageLoading = ref(false)
-const coverageError = ref('')
-const coverageData = ref(null)
-const chartRef = ref(null)
+const sidebarCollapsed = ref(false)
 
 async function fetchKB() {
   loading.value = true
   error.value = false
   try {
     kb.value = await getKnowledgeBase(kbId.value)
+    await nextTick()
+    setTimeout(() => {
+      pageTransition?.hideNodeExpand?.()
+    }, 100)
   } catch (e) {
     console.error('加载知识库失败:', e)
     error.value = true
     kb.value = null
+    pageTransition?.hideNodeExpand?.()
   } finally {
     loading.value = false
   }
 }
 
-async function openCoverageDialog() {
-  showCoverage.value = true
-  coverageLoading.value = true
-  coverageError.value = ''
-  coverageData.value = null
-  try {
-    const data = await api.get(`/analytics/kb/${kbId.value}/coverage`)
-    coverageData.value = data
-    await nextTick()
-    renderTreemap()
-  } catch (e) {
-    coverageError.value = e.message || '获取覆盖数据失败'
-  } finally {
-    coverageLoading.value = false
-  }
-}
-
-function renderTreemap() {
-  if (!chartRef.value || !coverageData.value) return
-  const chart = echarts.init(chartRef.value)
-
-  const categories = coverageData.value.categories || []
-  // 按实体数降序
-  categories.sort((a, b) => b.count - a.count)
-
-  const maxDays = Math.max(...categories.map(c => c.last_updated_days), 1)
-
-  chart.setOption({
-    tooltip: {
-      formatter: (params) => {
-        const d = params.data
-        return `<b>${d.name}</b><br/>实体数: ${d.value}<br/>最后更新: ${d.last_updated_days} 天前`
-      },
-    },
-    series: [{
-      type: 'treemap',
-      data: categories.map(c => ({
-        name: c.name,
-        value: c.count,
-        last_updated_days: c.last_updated_days,
-        itemStyle: {
-          // 颜色深浅：红色=老旧(>30天)，绿色=新鲜(<7天)，黄色=普通
-          color: c.last_updated_days > 30
-            ? `rgba(220,80,80,${0.5 + (1 - c.last_updated_days / maxDays) * 0.5})`
-            : c.last_updated_days > 7
-              ? `rgba(230,162,60,${0.5 + (1 - c.last_updated_days / maxDays) * 0.5})`
-              : `rgba(45,140,78,${0.4 + (1 - c.last_updated_days / maxDays) * 0.6})`,
-        },
-      })),
-      label: {
-        show: true,
-        formatter: (params) => `${params.name}\n${params.value}`,
-        fontSize: 12,
-      },
-      upperLabel: {
-        show: true,
-        height: 20,
-      },
-      roam: false,
-      width: '100%',
-      height: '100%',
-    }],
-  })
-
-  // 响应式调整
-  const observer = new ResizeObserver(() => chart.resize())
-  observer.observe(chartRef.value)
-}
-
-// 滑动指示器位置更新
-function updateNavIndicator() {
-  nextTick(() => {
-    if (!navIndicator.value) return
-    const active = document.querySelector('.nav-tab.active')
-    if (active) {
-      navIndicator.value.style.width = `${active.offsetWidth}px`
-      navIndicator.value.style.transform = `translateX(${active.offsetLeft}px)`
-    }
-  })
-}
-
 onMounted(() => {
   fetchKB()
-  updateNavIndicator()
-  window.addEventListener('resize', updateNavIndicator)
 })
 
 watch(() => route.params.id, (newId) => {
   if (newId) fetchKB()
 })
-
-watch(() => route.path, () => {
-  updateNavIndicator()
-})
 </script>
 
 <style scoped lang="scss">
+$sidebar-width: 260px;
+$sidebar-collapsed-width: 64px;
+
 .kb-layout {
   min-height: 100vh;
   display: flex;
-  flex-direction: column;
   background: var(--bg-page);
+  transition: padding-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.kb-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 24px;
-  background: var(--bg-glass);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border-bottom: 1px solid var(--border-light);
-  position: sticky;
+// ── 左侧导航栏 ──────────────────────────────────────────
+.kb-sidebar {
+  position: fixed;
+  left: 0;
   top: 0;
-  z-index: 50;
-  min-height: 56px;
-
-  // 渐变底边
-  &::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      var(--color-primary-light) 30%,
-      var(--color-primary) 50%,
-      var(--color-primary-light) 70%,
-      transparent 100%
-    );
-    opacity: 0.5;
-  }
+  bottom: 0;
+  width: $sidebar-width;
+  background: var(--bg-card);
+  border-right: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
 }
 
-.kb-header-left {
+.sidebar-collapsed .kb-sidebar {
+  width: $sidebar-collapsed-width;
+}
+
+// 折叠按钮（侧边栏右侧边缘，垂直居中）
+.collapse-btn {
+  position: absolute;
+  top: 50%;
+  right: -12px;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  color: var(--text-tertiary);
+  cursor: pointer;
   display: flex;
   align-items: center;
-  gap: var(--spacing-md);
-}
+  justify-content: center;
+  z-index: 10;
+  transition: all var(--transition-fast);
 
-.back-btn {
-  padding: 6px 12px;
-  font-size: 13px;
-  flex-shrink: 0;
-
-  .back-arrow {
-    transition: transform var(--transition-fast);
+  &:hover {
+    background: var(--color-primary);
+    color: #fff;
+    border-color: var(--color-primary);
   }
 
-  &:hover .back-arrow {
-    transform: translateX(-3px);
-  }
-}
+  .collapse-icon {
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 
-.kb-title {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-
-  h1 {
-    font-size: 18px;
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-
-  .kb-doc-count {
-    font-size: 12px;
-    color: var(--text-tertiary);
-    padding: 2px 10px;
-    background: var(--bg-page);
-    border-radius: var(--radius-full);
-    display: flex;
-    align-items: center;
-    gap: 5px;
-
-    .count-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--color-primary);
-      animation: dot-pulse 2s ease-in-out infinite;
+    &.flipped {
+      transform: rotate(180deg);
     }
   }
 }
 
-.skeleton-title {
-  flex: 1;
-}
-
-// ── 导航标签 ──────────────────────────────────────────
-.kb-nav {
-  background: var(--bg-card);
-  border-bottom: 1px solid var(--border-light);
-  position: sticky;
-  top: 56px;
-  z-index: 40;
-}
-
-.nav-inner {
+// 知识库头部
+.sidebar-header {
+  padding: 20px 20px 16px;
   display: flex;
-  position: relative;
-  padding: 0 24px;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
 }
 
-.nav-tab {
-  display: inline-flex;
+.sidebar-collapsed .sidebar-header {
+  padding: 20px 10px 16px;
+  justify-content: center;
+}
+
+.kb-icon-wrap {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.kb-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kb-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kb-meta {
+  display: flex;
   align-items: center;
   gap: 6px;
-  padding: 13px 22px;
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 12px;
+  color: var(--text-tertiary);
+
+  .meta-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-primary);
+  }
+}
+
+.sidebar-loading {
+  padding: 20px;
+}
+
+// 导航项（垂直居中区域）
+.sidebar-nav {
+  flex: 1;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
   text-decoration: none;
-  transition: color var(--transition-fast);
+  font-size: 14px;
+  font-weight: 500;
+  transition: all var(--transition-fast);
   position: relative;
-  z-index: 1;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+
+  .nav-icon {
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+    transition: color var(--transition-fast);
+  }
+
+  .nav-label {
+    flex: 1;
+    white-space: nowrap;
+  }
 
   &:hover {
-    color: var(--color-primary);
+    background: var(--bg-hover);
+    color: var(--text-primary);
+
+    .nav-icon {
+      color: var(--color-primary);
+    }
   }
 
   &.active {
-    color: var(--color-primary);
-    font-weight: 600;
+    background: var(--color-primary);
+    color: #fff;
+
+    .nav-icon {
+      color: #fff;
+    }
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 16px;
+      background: var(--color-primary-light);
+      border-radius: 0 2px 2px 0;
+    }
   }
 }
 
-// 滑动指示器
-.nav-indicator {
-  position: absolute;
-  bottom: 0;
-  left: 24px;
-  height: 2.5px;
-  border-radius: 2px;
-  background: var(--color-primary-gradient);
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
-              width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-  z-index: 0;
+.sidebar-collapsed .nav-item {
+  justify-content: center;
+  padding: 10px;
 }
 
-// v3.2: 右侧操作区
-.nav-extra {
-  margin-left: auto;
+// 分隔线
+.sidebar-divider {
+  height: 1px;
+  background: var(--border-light);
+  margin: 8px 14px;
+}
+
+// 底部区域
+.sidebar-bottom {
+  padding: 8px 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+
+.tool-item {
   display: flex;
   align-items: center;
-  padding-right: 8px;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all var(--transition-fast);
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+
+  .tool-icon {
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+    transition: color var(--transition-fast);
+  }
+
+  .tool-label {
+    flex: 1;
+    white-space: nowrap;
+  }
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+
+    .tool-icon {
+      color: var(--color-primary);
+    }
+  }
 }
 
+.sidebar-collapsed .tool-item {
+  justify-content: center;
+  padding: 10px;
+}
+
+// ── 主内容区 ──────────────────────────────────────────
 .kb-main {
   flex: 1;
-  padding: var(--spacing-lg) 24px;
+  margin-left: $sidebar-width;
+  padding: 0;
+  min-height: 100vh;
+  transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-// v3.2: 知识体检
+.sidebar-collapsed .kb-main {
+  margin-left: $sidebar-collapsed-width;
+}
+
+.error-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+}
+
+// ── 知识体检弹窗 ──────────────────────────────────────────
+.loading-state,
+.empty-state {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-secondary);
+}
+
+.loading-state p {
+  margin-top: 12px;
+}
+
 .coverage-summary {
   text-align: center;
   font-size: 14px;
@@ -398,5 +428,11 @@ watch(() => route.path, () => {
   padding: 8px 0;
   background: var(--bg-page);
   border-radius: var(--radius-sm);
+}
+
+.coverage-chart {
+  width: 100%;
+  height: 380px;
+  margin-top: 16px;
 }
 </style>

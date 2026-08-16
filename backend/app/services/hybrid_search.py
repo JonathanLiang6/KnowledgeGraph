@@ -1,9 +1,11 @@
 """
 混合检索服务 - LanceDB 向量检索 + BM25 稀疏检索 + RRF 融合
-P2 优化：BM25 增量更新、LanceDB 持久化、分词修复
+v4.0: FTS5 替代 rank-bm25 — 真正增量更新，零额外依赖
 v3.1: 统一 RRF 融合算法（标准 Reciprocal Rank Fusion, k=60）
 """
 import os
+import re
+import sqlite3
 import logging
 from typing import List, Tuple, Optional, Dict
 from dataclasses import dataclass, field
@@ -99,114 +101,173 @@ class Tokenizer:
         return tokens
 
 
-# ─── BM25 索引（增量更新）────────────────────────────────────────
+# ─── FTS5 全文索引（增量 BM25）────────────────────────────────
 
-class BM25Index:
+class FTS5Index:
     """
-    BM25 索引 — 支持增量更新。
-    文档数 ≤ threshold 时使用全量重建，超过后使用增量添加。
+    SQLite FTS5 全文索引 — 原生支持增量 INSERT/DELETE + BM25 排序。
+
+    优势 vs rank-bm25:
+    - 真正的增量更新（INSERT/DELETE 单条记录，无需全量重建）
+    - Python 标准库自带，零额外依赖
+    - trigram tokenizer 天然支持中文 (3-gram) 和英文 (词级)
+    - BM25 排序内置，FTS5 自动管理倒排索引
+
+    分词策略:
+    - FTS5 使用 `trigram` tokenizer
+    - 自动生成 3-字符 n-gram，中文无需额外分词器
+    - 等效于字符级 trigram 索引，兼顾子串匹配精度
     """
 
-    def __init__(self):
-        self.corpus: List[str] = []
-        self.doc_ids: List[str] = []
-        self._bm25 = None
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            from app.core.config import config
+            db_path = os.path.join(config.DATA_DIR, "knowledge_graph.db")
+        self._db_path = db_path
+        self._table_name = "fts_chunks"
+        self._conn: Optional[sqlite3.Connection] = None
+        self._init_table()
 
-    def index(self, docs: List[Tuple[str, str]]):
+    def _get_conn(self) -> sqlite3.Connection:
+        """获取或创建 SQLite 连接（WAL 模式兼容并发读写）"""
+        if self._conn is None:
+            self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.row_factory = sqlite3.Row
+        return self._conn
+
+    def _init_table(self):
+        """创建 FTS5 虚拟表（如果不存在）— trigram tokenizer 天然支持中文 n-gram"""
+        conn = self._get_conn()
+        conn.execute(f"""
+            CREATE VIRTUAL TABLE IF NOT EXISTS {self._table_name} USING fts5(
+                chunk_id UNINDEXED,
+                doc_id UNINDEXED,
+                text,
+                tokenize='trigram'
+            )
+        """)
+        conn.commit()
+
+    def add(self, docs: List[Tuple[str, str]]):
         """
-        全量构建 BM25 索引。
+        增量添加文档到 FTS5 索引。
 
         Args:
-            docs: [(doc_id, text), ...] 列表
-        """
-        from rank_bm25 import BM25Okapi
-
-        self.doc_ids = [d[0] for d in docs]
-        self.corpus = [d[1] for d in docs]
-        if not docs:
-            self._bm25 = None
-            return
-
-        tokenized = [Tokenizer.tokenize(text) for text in self.corpus]
-        self._bm25 = BM25Okapi(tokenized)
-        logger.info(f"BM25 全量索引构建完成: {len(docs)} 篇文档")
-
-    def add_documents(self, docs: List[Tuple[str, str]]):
-        """
-        添加文档并立即重建索引。
-
-        v2.3 修复: 移除伪增量模式 — 不再延迟重建;
-        rank_bm25 不支持增量更新, 每次添加文档后立即全量重建。
-
-        Args:
-            docs: [(doc_id, text), ...] 新增文档列表
+            docs: [(chunk_id, text), ...] — 每项一个分块
         """
         if not docs:
             return
-
-        self.doc_ids.extend(d[0] for d in docs)
-        self.corpus.extend(d[1] for d in docs)
-        self._rebuild_index()
-        logger.debug(f"BM25 添加 {len(docs)} 篇文档, 累计 {len(self.doc_ids)} 篇（索引已重建）")
-
-    def _rebuild_index(self):
-        """全量重建 BM25 索引"""
-        from rank_bm25 import BM25Okapi
-        if not self.corpus:
-            self._bm25 = None
-            return
-        tokenized = [Tokenizer.tokenize(text) for text in self.corpus]
-        self._bm25 = BM25Okapi(tokenized)
-        logger.debug(f"BM25 索引重建完成: {len(self.corpus)} 篇文档")
-
-    def _ensure_index(self):
-        """确保索引可用（延迟初始化）"""
-        if self._bm25 is None and self.corpus:
-            self._rebuild_index()
+        conn = self._get_conn()
+        with conn:
+            for chunk_id, text in docs:
+                # 提取 doc_id（chunk_id 格式通常为 uuid）
+                doc_id = chunk_id[:36] if len(chunk_id) >= 36 else chunk_id
+                conn.execute(
+                    f"INSERT INTO {self._table_name} (chunk_id, doc_id, text) VALUES (?, ?, ?)",
+                    (chunk_id, doc_id, text or ""),
+                )
+        logger.debug(f"FTS5 增量添加: {len(docs)} 块")
 
     def search(self, query: str, top_k: int = 10) -> List[Tuple[str, float]]:
         """
-        BM25 搜索。
+        FTS5 BM25 搜索。
+
+        使用简化的 FTS5 查询语法，将用户查询中的特殊字符转义。
 
         Returns:
-            [(doc_id, score), ...] 按分数降序排列
+            [(chunk_id, bm25_score), ...] 按 BM25 分数降序排列
         """
-        self._ensure_index()
-
-        if self._bm25 is None or not self.corpus:
+        conn = self._get_conn()
+        if not query or not query.strip():
             return []
 
-        tokenized_query = Tokenizer.tokenize(query)
-        if not tokenized_query:
+        # 转义 FTS5 特殊字符，构建安全的 MATCH 查询
+        safe_query = self._escape_fts5_query(query.strip())
+        if not safe_query:
             return []
 
-        scores = self._bm25.get_scores(tokenized_query)
+        try:
+            rows = conn.execute(f"""
+                SELECT chunk_id, bm25({self._table_name}) AS score
+                FROM {self._table_name}
+                WHERE {self._table_name} MATCH ?
+                ORDER BY score
+                LIMIT ?
+            """, (safe_query, top_k)).fetchall()
+        except sqlite3.OperationalError as e:
+            logger.warning(f"FTS5 搜索语法错误: {e}, query={safe_query[:100]}")
+            return []
 
-        # 归一化
-        max_score = float(max(scores)) if len(scores) > 0 and max(scores) > 0 else 1.0
-        normalized = scores / max_score
+        if not rows:
+            return []
 
-        # 排序取 top_k
-        ranked = sorted(
-            zip(self.doc_ids, normalized),
-            key=lambda x: x[1],
-            reverse=True,
-        )[:top_k]
+        # 归一化分数到 [0, 1]
+        scores = [row["score"] for row in rows]
+        min_score = min(scores)
+        max_score = max(scores)
+        denom = max_score - min_score if max_score != min_score else 1.0
+        # FTS5 BM25 分数越低越相关，取负后归一化
+        return [
+            (row["chunk_id"], round(1.0 - (row["score"] - min_score) / denom, 4))
+            for row in rows
+        ]
 
-        return [(doc_id, float(score)) for doc_id, score in ranked]
+    def remove_by_doc_id(self, doc_id: str):
+        """增量删除指定文档的所有分块"""
+        conn = self._get_conn()
+        with conn:
+            conn.execute(
+                f"DELETE FROM {self._table_name} WHERE doc_id = ?",
+                (doc_id,),
+            )
+        logger.debug(f"FTS5 删除文档: {doc_id}")
 
-    def remove_document(self, doc_id: str):
-        """移除文档 (v2.4: 不再每次重建, 由调用方控制)"""
-        if doc_id not in self.doc_ids:
-            return
-        idx = self.doc_ids.index(doc_id)
-        self.doc_ids.pop(idx)
-        self.corpus.pop(idx)
-        logger.debug(f"BM25 移除文档: {doc_id}")
+    def remove_by_chunk_id(self, chunk_id: str):
+        """增量删除单个分块"""
+        conn = self._get_conn()
+        with conn:
+            conn.execute(
+                f"DELETE FROM {self._table_name} WHERE chunk_id = ?",
+                (chunk_id,),
+            )
+
+    def clear(self):
+        """清空所有索引内容"""
+        conn = self._get_conn()
+        with conn:
+            conn.execute(f"DELETE FROM {self._table_name}")
+        logger.info("FTS5 索引已清空")
+
+    def close(self):
+        """关闭数据库连接"""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
 
     @property
     def document_count(self) -> int:
-        return len(self.doc_ids)
+        conn = self._get_conn()
+        row = conn.execute(
+            f"SELECT COUNT(DISTINCT doc_id) FROM {self._table_name}"
+        ).fetchone()
+        return row[0] if row else 0
+
+    @staticmethod
+    def _escape_fts5_query(query: str) -> str:
+        """
+        转义 FTS5 特殊字符，构建安全的查询字符串。
+
+        FTS5 会将裸词用 AND 连接。对于中文，每个 n-gram 字符
+        会被自动匹配，所以直接传入查询文本即可。
+        只需移除/转义可能破坏查询语法的特殊字符。
+        """
+        # 移除 FTS5 保留字符
+        cleaned = re.sub(r'[\[\]\(\)\{\}"\*]', '', query)
+        # 压缩空白
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        return cleaned
+
 
 
 # ─── LanceDB 向量存储（持久化）───────────────────────────────────
@@ -335,17 +396,14 @@ class LanceDBStore:
 
 class HybridSearchService:
     """
-    混合检索服务 - 向量 + BM25 双路并行检索 + RRF 融合。
+    混合检索服务 - LanceDB 向量检索 + FTS5 BM25 关键词检索 + RRF 融合。
 
-    P2 优化：
-    - BM25 增量更新（文档数 > threshold 时增量添加）
-    - LanceDB 持久化路径确认
-    - parent_text 双路查找（向量表 + BM25 文本库）
+    v4.0: 使用 SQLite FTS5 替代 rank-bm25 — 支持真正的增量索引。
     """
 
     def __init__(self):
         self.vector_store = LanceDBStore()
-        self.bm25_index = BM25Index()
+        self.bm25_index = FTS5Index()
         self.vector_weight = 0.7
         self.bm25_weight = 0.3
         # 用于 parent_text 查找的完整块缓存
@@ -353,7 +411,9 @@ class HybridSearchService:
 
     def index_document(self, chunks: List[dict], embeddings: List[List[float]]):
         """
-        对新文档建立索引（向量 + BM25 增量）。
+        对新文档建立索引（LanceDB 向量 + FTS5 增量关键词）。
+
+        v4.0: FTS5 支持真正的增量 INSERT，无需全量重建。
 
         Args:
             chunks: Chunk 列表
@@ -374,28 +434,28 @@ class HybridSearchService:
         for chunk in chunks:
             self._all_chunks_cache[chunk["id"]] = chunk
 
-        # BM25 增量更新（修复：不再每次全量重建）
+        # FTS5 增量添加（v4.0: 真正 O(1) 增量，无需全量重建）
         new_docs = [(chunk["id"], chunk["text"]) for chunk in chunks
                      if chunk.get("chunk_level") == "child"]
         if new_docs:
-            current_count = self.bm25_index.document_count
-            if current_count == 0:
-                self.bm25_index.index(new_docs)
-            else:
-                self.bm25_index.add_documents(new_docs)
+            self.bm25_index.add(new_docs)
 
     def rebuild_index_from_store(self):
-        """从 LanceDB 重建 BM25 索引（服务恢复用）"""
+        """从 LanceDB 重建 FTS5 索引（服务恢复用）— v4.0: 清空后增量写入"""
         all_chunks = self.vector_store.get_all_chunks()
         if not all_chunks:
             return
 
+        # 清空 FTS5
+        self.bm25_index.clear()
+
+        # 增量写入所有子块
         docs = [(c["id"], c["text"]) for c in all_chunks if c.get("chunk_level") == "child"]
-        self.bm25_index.index(docs)
+        self.bm25_index.add(docs)
 
         # 重建缓存
         self._all_chunks_cache = {c["id"]: c for c in all_chunks}
-        logger.info(f"从 LanceDB 重建索引: {len(docs)} 子块")
+        logger.info(f"从 LanceDB 重建 FTS5 索引: {len(docs)} 子块")
 
     def search(
         self,
@@ -404,15 +464,9 @@ class HybridSearchService:
         top_k: int = 20,
     ) -> List[SearchResult]:
         """
-        混合检索：向量 + BM25 → RRF 融合。
+        混合检索：LanceDB 向量 + FTS5 BM25 → RRF 融合。
 
-        Args:
-            query: 查询文本
-            query_vector: 查询向量
-            top_k: 返回结果数
-
-        Returns:
-            融合后的检索结果列表，按分数降序
+        v4.0: FTS5 替代 rank-bm25，BM25 分数由 SQLite 内置 bm25() 函数计算。
         """
         # 1. 向量检索
         vector_results_raw = self.vector_store.search(query_vector, top_k=top_k * 2)
@@ -431,7 +485,7 @@ class HybridSearchService:
             ))
             vector_ids.add(vid)
 
-        # 2. BM25 检索
+        # 2. FTS5 BM25 检索（v4.0: 真正增量索引）
         bm25_raw = self.bm25_index.search(query, top_k=top_k * 2)
         bm25_results: List[SearchResult] = []
         for doc_id, score in bm25_raw:
@@ -442,7 +496,7 @@ class HybridSearchService:
                     text=data.get("text", ""),
                     score=score,
                     parent_text=None,
-                    source="bm25",
+                    source="fts5",
                 ))
 
         # 3. RRF 融合 (标准 Reciprocal Rank Fusion)
@@ -469,28 +523,23 @@ class HybridSearchService:
         return results
 
     def remove_document(self, doc_id: str):
-        """移除文档的索引 (v2.4: 批量移除后一次重建 BM25)"""
+        """移除文档的索引 — v4.0: FTS5 增量 DELETE，无需重建"""
         # 从 LanceDB 移除
         self.vector_store.remove_by_doc_id(doc_id)
 
-        # 从缓存移除并收集待删除 BM25 ID
+        # 从缓存移除
         keys_to_remove = [k for k, v in self._all_chunks_cache.items()
                           if v.get("doc_id") == doc_id]
         for k in keys_to_remove:
             self._all_chunks_cache.pop(k, None)
-            if k in self.bm25_index.doc_ids:
-                idx = self.bm25_index.doc_ids.index(k)
-                self.bm25_index.doc_ids.pop(idx)
-                self.bm25_index.corpus.pop(idx)
 
-        # 批量移除后一次重建 BM25
-        if keys_to_remove:
-            self.bm25_index._rebuild_index()
-            logger.info(f"已移除文档索引: {doc_id} ({len(keys_to_remove)} 块)")
+        # FTS5 增量删除（v4.0: 真正 O(1) 删除，无需全量重建）
+        self.bm25_index.remove_by_doc_id(doc_id)
+        logger.info(f"已移除文档 FTS5 索引: {doc_id} ({len(keys_to_remove)} 块)")
 
 
 # ─── 模块级单例 ─────────────────────────────────────────────────
-# 所有检索和索引操作共享同一实例，确保 BM25 和向量数据一致
+# 所有检索和索引操作共享同一实例，确保 FTS5 和向量数据一致
 hybrid_search_service = HybridSearchService()
 
 

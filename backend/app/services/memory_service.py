@@ -6,7 +6,9 @@
 - 语义记忆 (Semantic Memory): 知识图谱（由 GraphService 提供）
 
 v3.2: kb_id 隔离 — 存储 Key 统一加 kb_id 前缀，确保不同知识库的记忆相互隔离
+v4.0: 添加 asyncio.Lock 保护 _session_memories 并发访问
 """
+import asyncio
 import time
 import logging
 from typing import List, Dict, Optional, Tuple
@@ -39,18 +41,18 @@ class WorkingMemory:
     在生成最终答案时作为上下文注入。
     """
 
-    MAX_STEPS = 10  # 最多保留的推理步数
-
     def __init__(self):
         self.steps: List[AgentStep] = []
         self.final_answer: str = ""
         self._scratchpad: List[str] = []
+        # v4.0: 从配置读取最大步数，确保与 Agent 配置同步
+        self.max_steps = max(config.AGENT_MAX_STEPS, 10)
 
     def add_step(self, step: AgentStep):
         """记录一个推理步骤"""
         self.steps.append(step)
-        if len(self.steps) > self.MAX_STEPS:
-            self.steps = self.steps[-self.MAX_STEPS:]
+        if len(self.steps) > self.max_steps:
+            self.steps = self.steps[-self.max_steps:]
 
     def add_thought(self, text: str):
         """添加临时思考（供特殊场景使用）"""
@@ -125,6 +127,8 @@ class EpisodicMemory:
 # 存储 key: "{kb_id}::{session_id}" → (WorkingMemory, EpisodicMemory, last_access_ts)
 # 当 kb_id 为空时使用 "__global__" 作为前缀
 _session_memories: Dict[str, Tuple[WorkingMemory, EpisodicMemory, float]] = {}
+# v4.0: 并发保护锁
+_session_lock = asyncio.Lock()
 
 
 def _make_session_key(kb_id: str, session_id: str) -> str:
@@ -134,7 +138,7 @@ def _make_session_key(kb_id: str, session_id: str) -> str:
 
 
 def _purge_expired_sessions():
-    """惰性清理过期会话（调用时触发）"""
+    """惰性清理过期会话（调用时触发，需在锁内调用）"""
     now = time.monotonic()
     expired = [
         key for key, (_, _, ts) in _session_memories.items()
@@ -149,28 +153,31 @@ def _purge_expired_sessions():
         logger.debug(f"清理 {len(expired)} 个过期会话记忆")
 
 
-def get_session_memory(kb_id: str, session_id: str) -> tuple:
+async def get_session_memory(kb_id: str, session_id: str) -> tuple:
     """获取或创建会话记忆 (working_memory, episodic_memory)，惰性清理过期会话
 
     v3.2: 强制 kb_id 隔离 — 不同知识库的记忆互不干扰
+    v4.0: 使用 asyncio.Lock 保护并发访问
     """
-    _purge_expired_sessions()
-    key = _make_session_key(kb_id, session_id)
-    now = time.monotonic()
-    if key not in _session_memories:
-        _session_memories[key] = (WorkingMemory(), EpisodicMemory(), now)
-    else:
+    async with _session_lock:
+        _purge_expired_sessions()
+        key = _make_session_key(kb_id, session_id)
+        now = time.monotonic()
+        if key not in _session_memories:
+            _session_memories[key] = (WorkingMemory(), EpisodicMemory(), now)
+        else:
+            wm, em, _ = _session_memories[key]
+            _session_memories[key] = (wm, em, now)  # 刷新访问时间
         wm, em, _ = _session_memories[key]
-        _session_memories[key] = (wm, em, now)  # 刷新访问时间
-    wm, em, _ = _session_memories[key]
-    return wm, em
+        return wm, em
 
 
-def clear_session_memory(kb_id: str, session_id: str):
-    """清除会话记忆（v3.2: 需要 kb_id 隔离）"""
-    key = _make_session_key(kb_id, session_id)
-    if key in _session_memories:
-        wm, em, _ = _session_memories[key]
-        wm.clear()
-        em.clear()
-        del _session_memories[key]
+async def clear_session_memory(kb_id: str, session_id: str):
+    """清除会话记忆（v3.2: 需要 kb_id 隔离, v4.0: 并发保护）"""
+    async with _session_lock:
+        key = _make_session_key(kb_id, session_id)
+        if key in _session_memories:
+            wm, em, _ = _session_memories[key]
+            wm.clear()
+            em.clear()
+            del _session_memories[key]

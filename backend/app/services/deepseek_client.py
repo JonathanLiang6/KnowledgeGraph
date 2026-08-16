@@ -135,7 +135,7 @@ class DeepSeekClient:
             for attempt in range(cls.MAX_RETRIES):
                 try:
                     response = await client.embeddings.create(
-                        model=config.EMBEDDING_MODEL,  # v2.4: 使用 embedding 模型而非 chat 模型
+                        model="text-embedding-3-small",  # v4.0: fix — use API-compatible model name (not BGE local model)
                         input=texts,
                     )
                     return [item.embedding for item in response.data]

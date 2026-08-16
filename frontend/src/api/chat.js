@@ -11,7 +11,8 @@ export function chatCompletions(data) {
 
 // 流式聊天 (SSE) - 使用相对路径通过 Vite 代理
 // v2.5: 修复行缓冲区 — 跨 chunk 边界的内容不再丢失
-export function chatCompletionsStream(data, onChunk, onDone, onError) {
+// v4.0: 增加 Agent 推理事件处理 (agent/thought, agent/action, agent/observation)
+export function chatCompletionsStream(data, onChunk, onDone, onError, onAgentEvent) {
   const controller = new AbortController()
 
   fetch('/api/v1/chat/completions', {
@@ -51,6 +52,11 @@ export function chatCompletionsStream(data, onChunk, onDone, onError) {
             }
             try {
               const json = JSON.parse(data)
+              // v4.0: 优先处理 Agent 推理事件
+              if (json.object === 'agent.event' && json.event) {
+                onAgentEvent?.(json.event)
+                continue
+              }
               const delta = json.choices?.[0]?.delta
               const char = delta?.content
               const charType = delta?.char_type || 'normal'

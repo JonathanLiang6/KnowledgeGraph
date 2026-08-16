@@ -1,5 +1,5 @@
 """
-FastAPI 应用入口 - v3.1 智能教学知识图谱管理平台
+FastAPI 应用入口 - v4.0 智能教学知识图谱管理平台
 """
 import logging
 import asyncio

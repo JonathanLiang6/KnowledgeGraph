@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 class LLMEntityRefiner:
     """使用 DeepSeek V4 对 NLP 粗筛结果进行精炼"""
 
+    # v4.0: 模糊匹配阈值 — LLM 返回的实体名与 NLP 候选名相似度 >= 此值时视为同一实体
+    FUZZY_MATCH_THRESHOLD = 0.75
+
     @classmethod
     async def refine(
         cls,
@@ -56,6 +59,33 @@ class LLMEntityRefiner:
         return '\n'.join(lines)
 
     @classmethod
+    def _find_best_match(cls, name: str, candidates: dict, threshold: float = None) -> Optional[str]:
+        """
+        v4.0: 模糊匹配实体名。先精确匹配，再使用 Jaccard 相似度模糊匹配。
+        解决 LLM 微调实体名（如 "机器学习"→"机器学习算法"）后的对不齐问题。
+        """
+        if threshold is None:
+            threshold = cls.FUZZY_MATCH_THRESHOLD
+
+        # 精确匹配
+        if name in candidates:
+            return name
+
+        # 模糊匹配：Jaccard 字符级相似度
+        name_chars = set(name)
+        best_key = None
+        best_sim = 0.0
+        for key in candidates:
+            key_chars = set(key)
+            intersection = name_chars & key_chars
+            union = name_chars | key_chars
+            sim = len(intersection) / len(union) if union else 0
+            if sim > best_sim and sim >= threshold:
+                best_sim = sim
+                best_key = key
+        return best_key
+
+    @classmethod
     def _merge_results(cls, nlp_candidates: List[dict], llm_result: dict) -> dict:
         """
         合并 NLP 粗筛和 LLM 精炼结果：
@@ -69,13 +99,17 @@ class LLMEntityRefiner:
         # 构建 LLM 实体名集合
         llm_names = {e.get("name", "") for e in llm_entities}
 
-        # 合并实体
+        # 合并实体（v4.0: 使用模糊匹配处理 LLM 微调后的实体名）
         merged_entities = {}
+        used_llm_names = set()
         for ent in nlp_candidates:
             name = ent["name"]
-            if name in llm_names:
+            # v4.0: 先精确再模糊匹配
+            matched_name = cls._find_best_match(name, {n: True for n in llm_names})
+            if matched_name:
                 # LLM 确认：更新
-                llm_ent = next(e for e in llm_entities if e.get("name") == name)
+                llm_ent = next(e for e in llm_entities if e.get("name") == matched_name)
+                used_llm_names.add(matched_name)
                 merged_entities[name] = {
                     **ent,
                     "description": llm_ent.get("description", ""),
@@ -95,7 +129,17 @@ class LLMEntityRefiner:
         color_idx = len(merged_entities)
         for llm_ent in llm_entities:
             name = llm_ent.get("name", "")
-            if name not in merged_entities:
+            if name in used_llm_names:
+                continue
+            # v4.0: 检查是否与已有实体模糊匹配（LLM 改名的情况）
+            matched_existing = cls._find_best_match(name, {n: True for n in merged_entities})
+            if matched_existing:
+                # LLM 改名了但 NLP 有类似实体：合并描述
+                existing = merged_entities[matched_existing]
+                if llm_ent.get("description"):
+                    existing["description"] = llm_ent.get("description", "")
+                existing["source"] = "nlp+llm"
+            else:
                 merged_entities[name] = {
                     "id": str(color_idx + 1),
                     "name": name,

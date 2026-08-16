@@ -1,16 +1,19 @@
 """
-拓扑导航 API - v3.2 Q10
+拓扑导航 API - v4.0
 
-个人知识库拓扑启动台的 CRUD 端点。
-管理 topology_nodes 和 topology_edges 的增删改查。
+个人知识库拓扑启动台 CRUD 端点。
+三层结构：根节点 → 分支节点 → 知识库节点。
 """
+import os
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select
 
 from app.core.database import get_db
 from app.models.topology import TopologyNode, TopologyEdge
+from app.models.knowledge_base import KnowledgeBase
+from app.models.document import Document
 from app.schemas.topology import (
     TopologyNodeCreate, TopologyNodeUpdate, TopologyNodeOut,
     TopologyEdgeCreate, TopologyEdgeOut, TopologyData,
@@ -138,7 +141,7 @@ async def delete_topology_node(
     node_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """删除拓扑节点（不级联删除关联的知识库）"""
+    """删除拓扑节点，级联删除关联的知识库及其所有文档"""
     stmt = select(TopologyNode).where(TopologyNode.id == node_id)
     result = await db.execute(stmt)
     node = result.scalar_one_or_none()
@@ -148,7 +151,111 @@ async def delete_topology_node(
     if node.is_root:
         raise HTTPException(status_code=400, detail="不能删除根节点")
 
-    # 删除该节点的所有边
+    node_name = node.name
+    kb_id = node.kb_id
+
+    # ── 1. 如果节点绑定了知识库，级联删除该知识库 ──
+    deleted_kb_name = None
+    if kb_id:
+        kb_stmt = select(KnowledgeBase).where(KnowledgeBase.id == kb_id)
+        kb_result = await db.execute(kb_stmt)
+        kb = kb_result.scalar_one_or_none()
+        if kb:
+            deleted_kb_name = kb.name
+
+            # 收集文档ID和文件路径（在级联删除前）
+            docs_result = await db.execute(
+                select(Document.id, Document.file_path).where(Document.kb_id == kb_id)
+            )
+            doc_rows = docs_result.all()
+            doc_ids = [row[0] for row in doc_rows]
+            file_paths = [row[1] for row in doc_rows if row[1]]
+
+            # 清理检索引擎中的索引
+            try:
+                from app.services.hybrid_search import hybrid_search_service
+                for doc_id in doc_ids:
+                    hybrid_search_service.remove_document(doc_id)
+                logger.info(f"已清理 {len(doc_ids)} 个文档的检索索引")
+            except Exception as e:
+                logger.warning(f"清理检索索引失败（非致命）: {e}")
+
+            # 删除知识库（级联删除文档记录）
+            await db.delete(kb)
+            await db.flush()
+
+            # 清理物理文件
+            for fp in file_paths:
+                if os.path.exists(fp):
+                    try:
+                        os.remove(fp)
+                    except OSError as e:
+                        logger.warning(f"删除文件失败: {fp}, {e}")
+
+            logger.info(f"级联删除知识库: {deleted_kb_name}")
+
+    # ── 2. 查找并删除所有子节点（分支节点下的KB节点）─
+    # 如果删除的是分支节点，需要删除其下所有KB节点及其知识库
+    child_kb_count = 0
+    child_kb_names = []
+    if not kb_id:  # 是分支节点
+        # 查找该分支节点的所有子节点（KB节点）
+        child_edge_stmt = select(TopologyEdge).where(TopologyEdge.source_id == node_id)
+        child_edge_result = await db.execute(child_edge_stmt)
+        child_edges = child_edge_result.scalars().all()
+
+        for edge in child_edges:
+            child_node_stmt = select(TopologyNode).where(TopologyNode.id == edge.target_id)
+            child_node_result = await db.execute(child_node_stmt)
+            child_node = child_node_result.scalar_one_or_none()
+            if child_node and child_node.kb_id:
+                # 删除子KB节点的知识库
+                child_kb_stmt = select(KnowledgeBase).where(KnowledgeBase.id == child_node.kb_id)
+                child_kb_result = await db.execute(child_kb_stmt)
+                child_kb = child_kb_result.scalar_one_or_none()
+                if child_kb:
+                    child_kb_names.append(child_kb.name)
+
+                    # 收集文档
+                    child_docs_result = await db.execute(
+                        select(Document.id, Document.file_path).where(Document.kb_id == child_node.kb_id)
+                    )
+                    child_doc_rows = child_docs_result.all()
+                    child_doc_ids = [row[0] for row in child_doc_rows]
+                    child_file_paths = [row[1] for row in child_doc_rows if row[1]]
+
+                    # 清理检索索引
+                    try:
+                        from app.services.hybrid_search import hybrid_search_service
+                        for doc_id in child_doc_ids:
+                            hybrid_search_service.remove_document(doc_id)
+                    except Exception as e:
+                        logger.warning(f"清理检索索引失败: {e}")
+
+                    # 删除知识库
+                    await db.delete(child_kb)
+
+                    # 清理物理文件
+                    for fp in child_file_paths:
+                        if os.path.exists(fp):
+                            try:
+                                os.remove(fp)
+                            except OSError as e:
+                                logger.warning(f"删除文件失败: {fp}, {e}")
+
+                # 删除子节点的边
+                await db.delete(edge)
+
+                # 删除子节点
+                if child_node:
+                    await db.delete(child_node)
+
+                child_kb_count += 1
+
+        if child_kb_count > 0:
+            logger.info(f"级联删除 {child_kb_count} 个子知识库: {child_kb_names}")
+
+    # ── 3. 删除该节点的所有边 ──
     edge_stmt = select(TopologyEdge).where(
         (TopologyEdge.source_id == node_id) | (TopologyEdge.target_id == node_id)
     )
@@ -156,9 +263,23 @@ async def delete_topology_node(
     for edge in edge_result.scalars():
         await db.delete(edge)
 
+    # ── 4. 删除节点本身 ──
     await db.delete(node)
     await db.commit()
-    return {"status": "ok", "message": f"节点 '{node.name}' 已删除"}
+
+    # 构建响应消息
+    msg_parts = [f"节点 '{node_name}' 已删除"]
+    if deleted_kb_name:
+        msg_parts.append(f"，知识库 '{deleted_kb_name}' 已删除")
+    if child_kb_count > 0:
+        msg_parts.append(f"，{child_kb_count} 个子知识库已删除")
+
+    return {
+        "status": "ok",
+        "message": "".join(msg_parts),
+        "deleted_kb": deleted_kb_name,
+        "deleted_child_kbs": child_kb_names,
+    }
 
 
 # ── 边 CRUD ─────────────────────────────────────────────────────────

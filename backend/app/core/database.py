@@ -83,14 +83,14 @@ async def init_db():
     生产环境建议使用 Alembic 迁移。
     """
     async with engine.begin() as conn:
-        # 创建新表
-        await conn.run_sync(Base.metadata.create_all)
-
-        # WAL 模式
+        # WAL 模式 — 必须在 create_all 之前启用，确保初始建表使用 WAL
         if _is_sqlite:
             await conn.run_sync(
                 lambda sync_conn: sync_conn.exec_driver_sql("PRAGMA journal_mode=WAL")
             )
+
+        # 创建新表
+        await conn.run_sync(Base.metadata.create_all)
 
         # v2.4: 迁移 — 为已有 documents 表添加 file_hash 列
         if _is_sqlite:
@@ -115,8 +115,8 @@ async def init_db():
                         )
                     )
                     logger.info(f"数据库迁移: 已添加 {table_name}.kb_id 列")
-                except Exception:
-                    pass  # 列已存在
+                except Exception as e:
+                    logger.warning(f"数据库迁移跳过 (可能列已存在): {table_name} — {e}")
 
 
 async def close_db():

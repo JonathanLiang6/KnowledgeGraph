@@ -68,10 +68,6 @@ Final Answer: <最终回答>
 
 {episodic_memory}
 
-## 工作记忆（之前的推理步骤）
-
-{working_memory}
-
 用户问题: {user_query}
 
 现在请开始推理。"""
@@ -112,7 +108,18 @@ class ReActAgent:
         self.kb_id = kb_id
         self.session_id = session_id
         self.enable_web = enable_web
-        self.working_memory, self.episodic_memory = get_session_memory(kb_id, session_id)
+        # v4.0: get_session_memory 现在是 async 的（内部有并发锁）
+        self._memory_initialized = False
+        self.working_memory = WorkingMemory()
+        self.episodic_memory = EpisodicMemory()
+
+    async def _ensure_memory(self):
+        """延迟初始化会话记忆（首次 run 时调用）"""
+        if not self._memory_initialized:
+            self.working_memory, self.episodic_memory = await get_session_memory(
+                self.kb_id, self.session_id
+            )
+            self._memory_initialized = True
 
     async def run(
         self,
@@ -129,29 +136,27 @@ class ReActAgent:
         - {"type": "agent/error", "content": "..."}
         - {"type": "agent/done"}
         """
+        # v4.0: 延迟初始化会话记忆（首次运行）
+        await self._ensure_memory()
+
         yield {"type": "agent/thought", "content": f"开始分析问题: {user_query[:100]}..."}
 
         tools_desc = get_tools_description(enable_web=self.enable_web)
         episodic_context = self.episodic_memory.get_summary()
         web_search_rules = WEB_SEARCH_RULES_ENABLED if self.enable_web else WEB_SEARCH_RULES_DISABLED
 
-        # 构建初始系统提示
-        def _build_system_prompt(wm_context: str) -> str:
+        # 构建初始系统提示（v4.0: 移除冗余的工作记忆注入，通过对话消息传递推理历史）
+        def _build_system_prompt() -> str:
             return REACT_SYSTEM_PROMPT.format(
                 tools_description=tools_desc,
                 max_steps=MAX_AGENT_STEPS,
                 episodic_memory=episodic_context or "无历史对话",
-                working_memory=wm_context,
                 user_query=user_query,
                 web_search_rules=web_search_rules,
             )
 
-        working_memory_context = self.working_memory.get_context()
-        if not working_memory_context:
-            working_memory_context = "无（第一步）"
-
         messages = [
-            {"role": "system", "content": _build_system_prompt(working_memory_context)},
+            {"role": "system", "content": _build_system_prompt()},
         ]
 
         # Step 循环
@@ -205,11 +210,7 @@ class ReActAgent:
 
                 yield {"type": "agent/observation", "content": observation}
 
-                # 更新工作记忆上下文并重建系统提示
-                working_memory_context = self.working_memory.get_context()
-                messages[0]["content"] = _build_system_prompt(working_memory_context)
-
-                # 更新消息继续循环
+                # 更新消息继续循环（推理历史通过对话消息传递，无需重建系统提示）
                 messages.append({"role": "assistant", "content": content})
                 messages.append({
                     "role": "user",
@@ -225,8 +226,14 @@ class ReActAgent:
                 yield {"type": "agent/done"}
                 return
 
-        # 达到最大步数，强制生成答案
+        # 达到最大步数，强制生成答案（v4.0: 记录到工作记忆）
         logger.info(f"Agent 达到最大步数 {MAX_AGENT_STEPS}，强制生成最终答案")
+        self.working_memory.add_step(AgentStep(
+            step_num=MAX_AGENT_STEPS + 1,
+            thought="达到最大推理步数，综合已有信息生成回答",
+            action="generate_summary",
+            action_input="综合所有 Observation",
+        ))
         yield {"type": "agent/thought", "content": "达到最大推理步数，综合已有信息生成回答..."}
 
         try:
@@ -298,38 +305,44 @@ class ReActAgent:
 
     def _parse_react_output(self, content: str) -> dict:
         """
-        解析 ReAct 格式的 LLM 输出。
+        解析 ReAct 格式的 LLM 输出（v4.0: 更健壮的多行解析）。
 
         支持的格式:
-        - Thought: ... \n Action: tool_name \n Action Input: ...
+        - Thought: ... \\n Action: tool_name \\n Action Input: ...
         - Final Answer: ...
         """
         result = {}
 
-        # 提取 Thought
-        thought_match = re.search(r'Thought:\s*(.+?)(?=\n(?:Action|Final)|\Z)', content, re.DOTALL)
-        if thought_match:
-            result["thought"] = thought_match.group(1).strip()
-
-        # 检查 Final Answer
+        # 检查 Final Answer（优先，避免误解析）
         final_match = re.search(r'Final\s*Answer:\s*(.+)', content, re.DOTALL | re.IGNORECASE)
         if final_match:
             result["final_answer"] = final_match.group(1).strip()
             return result
 
+        # v4.0: 提取 Thought — 支持多行内容，一直匹配到 Action 或 Final 为止
+        thought_match = re.search(
+            r'Thought:\s*(.+?)(?=\n\s*(?:Action|Final)|\Z)',
+            content, re.DOTALL | re.IGNORECASE
+        )
+        if thought_match:
+            result["thought"] = thought_match.group(1).strip()
+
         # 提取 Action
-        action_match = re.search(r'Action:\s*(\w+)', content)
+        action_match = re.search(r'Action:\s*(\w+)', content, re.IGNORECASE)
         if action_match:
             result["action"] = action_match.group(1).strip()
 
-        # 提取 Action Input
-        input_match = re.search(r'Action\s*Input:\s*(.+?)(?=\n(?:Observation|Thought)|\Z)', content, re.DOTALL)
+        # v4.0: 提取 Action Input — 支持多行输入，到 Observation/Thought 或结尾
+        input_match = re.search(
+            r'Action\s*Input:\s*(.+?)(?=\n\s*(?:Observation|Thought|Action)|\Z)',
+            content, re.DOTALL | re.IGNORECASE
+        )
         if input_match:
             result["action_input"] = input_match.group(1).strip()
 
         return result
 
     @classmethod
-    def clear_session(cls, kb_id: str, session_id: str):
-        """清除指定会话的 Agent 记忆（v3.2: kb_id 隔离）"""
-        clear_session_memory(kb_id, session_id)
+    async def clear_session(cls, kb_id: str, session_id: str):
+        """清除指定会话的 Agent 记忆（v3.2: kb_id 隔离）— v4.0: 修复缺少 await"""
+        await clear_session_memory(kb_id, session_id)

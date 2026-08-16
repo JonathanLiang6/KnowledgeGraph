@@ -3,7 +3,8 @@
 
 P1 优化：
 - Stage 解耦：每个阶段独立为一个 handler，支持单独测试
-- 断点续传：状态持久化到 DB，重启后可从最后成功阶段恢复
+- 断点续传：状态持久化到 DB，同一进程内可从最后成功阶段恢复
+  （注意：chunks/embedding 等中间数据保存在内存中，服务重启后会丢失）
 - 并发控制：Semaphore 限制同时处理的文档数
 - ThreadPool：CPU 密集型任务（Embedding）在线程池中执行
 - 超时保护：每个阶段可独立超时
@@ -208,6 +209,13 @@ async def _process_document(doc_id: str, filepath: str, task_id: str):
             doc.processed_at = datetime.now()
             await db.commit()  # 最终持久化
 
+            # v4.0: 通知缓存系统知识库内容已变更
+            try:
+                from app.services.rag_service import invalidate_kb_cache
+                invalidate_kb_cache(doc.kb_id)
+            except Exception:
+                pass
+
             update_task(
                 task_id, status="done", progress=100, stage="处理完成",
                 result={
@@ -231,7 +239,13 @@ async def _process_document(doc_id: str, filepath: str, task_id: str):
                 doc = result.scalar_one_or_none()
                 if doc:
                     doc.status = DocumentStatus.FAILED
-                    doc.error_message = str(e)[:1000]
+                    # v4.0: 错误信息脱敏，移除路径和堆栈信息
+                    err_msg = str(e).split("Traceback")[0].strip()
+                    # 移除可能的服务器绝对路径
+                    import re as _re
+                    err_msg = _re.sub(r'[A-Za-z]:\\[^\s,;]+', '[path]', err_msg)
+                    err_msg = _re.sub(r'/[^\s,;]+\.py', '[path]', err_msg)
+                    doc.error_message = err_msg[:1000]
                     await db.commit()
             except Exception as status_error:
                 logger.error(f"更新文档失败状态时出错: {status_error}")

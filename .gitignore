@@ -83,3 +83,9 @@ $RECYCLE.BIN/
 *.temp
 tmp/
 temp/
+
+# ── Local audit reports & agent sessions ────
+CODE_AUDIT_REPORT.md
+TECHNICAL_SPEC.md
+report.md
+.zcode/

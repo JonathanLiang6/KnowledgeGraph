@@ -121,7 +121,6 @@ class Config:
     # ========================
     LANCEDB_PATH: str = os.getenv("LANCEDB_PATH", str(BASE_DIR / "data" / "lancedb"))
     INDEX_PERSIST_INTERVAL: int = _safe_int("INDEX_PERSIST_INTERVAL", "0")
-    BM25_INCREMENTAL_THRESHOLD: int = _safe_int("BM25_INCREMENTAL_THRESHOLD", "10")
 
     # ========================
     # GraphRAG Phase 1: 图检索与社区检测配置

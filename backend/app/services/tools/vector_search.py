@@ -24,16 +24,25 @@ async def vector_search(
     Returns:
         格式化的检索结果文本
     """
-    from app.services.rag_service import RAGService
+    from app.services.hybrid_search import hybrid_search_service
+    from app.services.embedding_service import EmbeddingService
 
+    # v4.0: 使用纯向量检索（不经过 GraphRAG 增强，让 Agent 自行决定是否调用图遍历）
     try:
-        results = await RAGService.search_async(
-            query=query,
-            kb_id=kb_id,
-            db=db,
-            top_k=top_k,
-            use_rerank=True,
-        )
+        query_vector = EmbeddingService.encode_single(query)
+        raw_results = hybrid_search_service.vector_store.search(query_vector, top_k=top_k)
+        # 转换为 SearchResult 格式
+        results = []
+        for r in raw_results:
+            distance = r.get("_distance", 0.0)
+            similarity = 1.0 / (1.0 + distance)
+            data = hybrid_search_service._all_chunks_cache.get(r.get("id", ""), {})
+            results.append({
+                "chunk_id": r.get("id", ""),
+                "text": data.get("text", r.get("text", "")),
+                "score": similarity,
+                "source": "vector",
+            })
     except Exception as e:
         logger.warning(f"向量检索失败: {e}")
         return f"向量检索出错: {e}"
@@ -43,7 +52,7 @@ async def vector_search(
 
     lines = [f"向量检索「{query}」返回 {len(results)} 个结果:"]
     for i, r in enumerate(results, 1):
-        text = (r.parent_text or r.text or "")[:300]
-        score = r.score
-        lines.append(f"\n[{i}] 相关性={score:.3f}\n{text}")
+        text = (r.get("text", "") or "")[:300]
+        score = r.get("score", 0)
+        lines.append(f"\n[{i}] 相似度={score:.3f}\n{text}")
     return "\n".join(lines)

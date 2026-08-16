@@ -1,5 +1,5 @@
 # ============================================================
-# KnowledgeGraph v3.1 — Multi-stage Docker Build
+# KnowledgeGraph v4.0 — Multi-stage Docker Build (non-root)
 # ============================================================
 # Stage 1: Build frontend
 FROM node:20-alpine AS frontend-builder
@@ -12,7 +12,7 @@ RUN npm run build
 # Stage 2: Production runtime
 FROM python:3.11-slim
 LABEL org.opencontainers.image.title="KnowledgeGraph"
-LABEL org.opencontainers.image.version="3.1.0"
+LABEL org.opencontainers.image.version="4.0.0"
 
 WORKDIR /app
 
@@ -31,8 +31,16 @@ COPY backend/ .
 # Production frontend from stage 1
 COPY --from=frontend-builder /frontend/dist /app/static
 
+# Non-root runtime user (v4.1: 移除容器内提权面)
+RUN useradd --create-home --shell /bin/bash appuser
+
 # Data directories (populated via volumes at runtime)
-RUN mkdir -p data inputs/files
+RUN mkdir -p data inputs/files && chown -R appuser:appuser /app/data /app/inputs /home/appuser
+
+# 模型/缓存下载目录指向可写位置
+ENV HOME=/home/appuser
+
+USER appuser
 
 EXPOSE 8013
 

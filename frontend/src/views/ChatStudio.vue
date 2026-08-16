@@ -105,7 +105,6 @@
             </div>
             <div
               class="msg-text"
-              :class="{ 'msg-streaming': isStreaming && idx === messages.length - 1 && msg.role === 'assistant' }"
               v-html="renderMessageContent(msg, idx)"
             />
             <div v-if="msg.error" class="msg-error">
@@ -199,10 +198,19 @@ const suggestedQuestions = [
 // ─── 工具函数 ─────────────────────────────────────────
 function genId() { return `msg-${Date.now()}-${++msgIdCounter}` }
 
-function scrollToBottom() {
-  nextTick(() => {
+// v4.1 (#69): rAF 合并滚动调用；打字机高频场景用 instant 避免多次 smooth 相互打架；
+// 仅当用户接近底部时自动跟随，向上翻阅历史不被打断
+let scrollPending = false
+function scrollToBottom(smooth = true) {
+  if (scrollPending) return
+  scrollPending = true
+  requestAnimationFrame(() => {
+    scrollPending = false
     const el = messagesContainer.value
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+    if (!nearBottom) return
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
   })
 }
 
@@ -224,19 +232,26 @@ function renderMarkdown(text) {
     .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
 }
 
-function escapeHtml(text) {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/\n/g, '<br>')
-}
-
 // v3.2: 流式 Markdown 渲染节流 — 避免逐字符调用 marked.parse()
 let streamingMdCache = ''
 const streamingMdRendered = ref('')       // v4.0: 使用 ref 让 Vue 自动追踪变化
 let mdRenderPending = false
+
+// v4.1 (#68): 历史消息渲染缓存 — 打字机逐字符重渲染期间，历史消息若 content
+// 未变则直接复用渲染结果，避免对全部消息做 marked.parse + DOMPurify 全量重算
+const historyMdCache = new Map()          // msgId -> { content, html }
+const HISTORY_MD_CACHE_MAX = 200
+
+function renderHistoryMarkdown(msg) {
+  const cached = historyMdCache.get(msg.id)
+  if (cached && cached.content === msg.content) return cached.html
+  const html = renderMarkdown(msg.content)
+  historyMdCache.set(msg.id, { content: msg.content, html })
+  if (historyMdCache.size > HISTORY_MD_CACHE_MAX) {
+    historyMdCache.delete(historyMdCache.keys().next().value)
+  }
+  return html
+}
 
 function renderMessageContent(msg, idx) {
   // 流式输出中或打字机队列仍在消耗 → 实时 Markdown 渲染 + 闪烁光标
@@ -263,7 +278,7 @@ function renderMessageContent(msg, idx) {
     }
     return streamingMdRendered.value + '<span class="typewriter-cursor">|</span>'
   }
-  return renderMarkdown(msg.content)
+  return renderHistoryMarkdown(msg)
 }
 
 // ─── 打字机队列系统 ────────────────────────────────────
@@ -345,7 +360,7 @@ function processTypewriterQueue(msg) {
     lastAutoSave = now
   }
 
-  scrollToBottom()
+  scrollToBottom(false)  // v4.1 (#69): 高频出队用 instant 滚动，避免 smooth 互相打架
   typewriterTimeoutId = setTimeout(() => processTypewriterQueue(msg), totalDelay)
 }
 
@@ -389,6 +404,7 @@ function loadMessages() {
     if (raw) messages.value = JSON.parse(raw)
     msgIdCounter = messages.value.length
   } catch { messages.value = [] }
+  historyMdCache.clear()  // v4.1 (#68): 历史消息缓存随会话切换失效
 }
 
 // ─── 核心操作 ─────────────────────────────────────────
@@ -414,13 +430,16 @@ async function sendMessage() {
   const assistantId = genId()
   const assistantMsg = { id: assistantId, role: 'assistant', content: '' }
   messages.value.push(assistantMsg)
+  // v4.1 (#67): 从 ref 取出响应式代理再交给闭包 — 直接持有原始对象时
+  // onAgentEvent/onError 对 reasoningSteps/error 的修改 Vue 感知不到
+  const liveMsg = messages.value[messages.value.length - 1]
   isStreaming.value = true
 
   // 构建请求消息列表
   const chatMessages = []
   for (const m of messages.value) {
     if (m.error) continue
-    if (m === assistantMsg) continue
+    if (m === liveMsg) continue  // v4.1: 代理比较恒成立，正确排除占位消息
     chatMessages.push({ role: m.role, content: m.content })
   }
 
@@ -443,8 +462,8 @@ async function sendMessage() {
       streamingMdRendered.value = ''
       // 如果队列已空且打字机未运行，手动最终化
       if (typewriterQueue.length === 0 && !typewriterRunning.value) {
-        if (!assistantMsg.content) {
-          assistantMsg.content = '(AI 未返回内容)'
+        if (!liveMsg.content) {
+          liveMsg.content = '(AI 未返回内容)'
         }
         saveMessages()
         scrollToBottom()
@@ -453,7 +472,7 @@ async function sendMessage() {
     // onError — 清空队列，保留已显示内容
     (err) => {
       cleanupTypewriter()
-      assistantMsg.error = err.message || '请求失败'
+      liveMsg.error = err.message || '请求失败'
       isStreaming.value = false
       streamController = null
       saveMessages()
@@ -464,13 +483,12 @@ async function sendMessage() {
       // 将推理事件插入消息列表中（作为特殊卡片显示）
       const type = event.type || ''
       if (type === 'agent/thought' || type === 'agent/action' || type === 'agent/observation') {
-        // 在 assistant 消息中追加推理步骤标记
-        // v4.0: Vue 3 ref 自动追踪深层对象变更，无需手动触发更新
-        if (!assistantMsg.reasoningSteps) assistantMsg.reasoningSteps = []
-        assistantMsg.reasoningSteps.push(event)
+        // v4.1 (#67): 经响应式代理写入，推理卡片即时渲染（首字符前到达的事件同样生效）
+        if (!liveMsg.reasoningSteps) liveMsg.reasoningSteps = []
+        liveMsg.reasoningSteps.push(event)
       }
       if (type === 'agent/error') {
-        assistantMsg.error = event.content || '推理过程出错'
+        liveMsg.error = event.content || '推理过程出错'
       }
     }
   )
@@ -519,6 +537,7 @@ async function clearChat() {
   if (isStreaming.value) stopStreaming()
   cleanupTypewriter()
   messages.value = []
+  historyMdCache.clear()  // v4.1 (#68): 清空对话同步清理渲染缓存
   try { localStorage.removeItem(`chat_${route.params.id}`) } catch { /* ignore */ }
   inputRef.value?.focus()
 }

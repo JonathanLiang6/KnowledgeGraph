@@ -88,7 +88,7 @@ class RAGService:
     """
 
     @classmethod
-    async def index_document(cls, doc_id: str, text: str) -> dict:
+    async def index_document(cls, doc_id: str, text: str, kb_id: str = None) -> dict:
         """对文档进行完整索引"""
         chunks = _chunker.chunk(text, doc_id)
         child_chunks = [c for c in chunks if c.chunk_level == "child"]
@@ -99,7 +99,7 @@ class RAGService:
         embeddings = await EmbeddingService.encode_async(child_texts)
 
         chunk_dicts = [c.to_dict() for c in child_chunks]
-        _hybrid_search.index_document(chunk_dicts, embeddings)
+        _hybrid_search.index_document(chunk_dicts, embeddings, kb_id=kb_id)
 
         return {
             "chunk_count": len(chunks),
@@ -143,7 +143,7 @@ class RAGService:
         if config.ENABLE_GRAPH_RAG and kb_id and db:
             results = await _graph_enhanced_search_async(query, top_k, use_rerank, kb_id, db)
         else:
-            results = _do_search(query, top_k, use_rerank)
+            results = _do_search(query, top_k, use_rerank, kb_id=kb_id)
 
         elapsed_ms = (time.monotonic() - t_start) * 1000
 
@@ -311,13 +311,14 @@ def _do_search(
     query: str,
     top_k: int = None,
     use_rerank: bool = True,
+    kb_id: str = None,
 ) -> List[SearchResult]:
-    """核心检索流程（单轮）"""
+    """核心检索流程（单轮）— #46: kb_id 透传到混合检索做知识库隔离"""
     if top_k is None:
         top_k = config.HYBRID_SEARCH_TOP_K
 
     query_vector = EmbeddingService.encode_single(query)
-    results = _hybrid_search.search(query, query_vector, top_k=top_k * 2)
+    results = _hybrid_search.search(query, query_vector, top_k=top_k * 2, kb_id=kb_id)
 
     if use_rerank and len(results) > top_k:
         rerank_input = [
@@ -370,14 +371,14 @@ async def _graph_enhanced_search_async(
         graph_results = await retriever.retrieve(query, kb_id, db, top_k=top_k)
     except Exception as e:
         logger.warning(f"[GraphRAG] 图检索失败，回退到混合检索: {e}")
-        return _do_search(query, top_k, use_rerank)
+        return _do_search(query, top_k, use_rerank, kb_id=kb_id)
 
     if not graph_results:
         logger.debug("[GraphRAG] 图检索无结果，使用混合检索")
-        return _do_search(query, top_k, use_rerank)
+        return _do_search(query, top_k, use_rerank, kb_id=kb_id)
 
-    # 标准混合检索
-    hybrid_results = _do_search(query, top_k, use_rerank)
+    # 标准混合检索（#46: 同样按 kb_id 隔离）
+    hybrid_results = _do_search(query, top_k, use_rerank, kb_id=kb_id)
 
     # 将图检索结果转换为 SearchResult 格式
     # v4.0: 移除 RRF 融合前的权重预乘（RRF 基于排名而非原始分数，预乘无意义）
@@ -390,8 +391,14 @@ async def _graph_enhanced_search_async(
             source="graph_traversal",
         ))
 
-    # RRF 融合：混合检索 + 图检索（rrf_fusion 已按 RRF 分数降序排列）
-    merged = rrf_fusion([hybrid_results, graph_as_search], k=60)
+    # 加权 RRF 融合：混合检索 + 图检索（#62: 消费 config 权重 —
+    # 混合路权重 = 向量+BM25 权重之和，图谱路权重 = GRAPH_RETRIEVAL_WEIGHT，
+    # 与三路配置权重比例保持一致；rrf_fusion 已按加权分数降序排列）
+    merged = rrf_fusion(
+        [hybrid_results, graph_as_search],
+        k=60,
+        weights=[config.VECTOR_WEIGHT + config.BM25_WEIGHT, config.GRAPH_RETRIEVAL_WEIGHT],
+    )
 
     elapsed = (time.monotonic() - t0) * 1000
     logger.debug(

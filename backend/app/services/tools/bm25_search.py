@@ -28,7 +28,8 @@ async def bm25_search(
 
     # v4.0: 使用纯 BM25 检索（而非混合检索），与工具名称保持一致
     try:
-        raw_results = hybrid_search_service.bm25_index.search(keywords, top_k=top_k)
+        # #46: 按 kb_id 隔离，只检索当前知识库的块
+        raw_results = hybrid_search_service.bm25_index.search(keywords, top_k=top_k, kb_id=kb_id)
         # 补充文本内容
         results = []
         for doc_id, score in raw_results:

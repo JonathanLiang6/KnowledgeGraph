@@ -434,7 +434,7 @@ async def _stage_indexing(
     # 清理旧索引条目，防止 reprocess 产生重复
     hybrid_search_service.remove_document(doc.id)
     chunk_dicts = [c.to_dict() for c in child_chunks]
-    hybrid_search_service.index_document(chunk_dicts, embeddings)
+    hybrid_search_service.index_document(chunk_dicts, embeddings, kb_id=doc.kb_id)
 
     logger.info(f"Stage 6 [indexing]: {len(chunk_dicts)} 子块已索引")
 

@@ -1,7 +1,8 @@
 """
-DeepSeek V4 API 客户端封装 - 支持 Chat Completions (含流式) 和 Embedding
+DeepSeek V4 API 客户端封装 - 支持 Chat Completions (含流式)
 v2.4: 智能重试(仅可恢复错误) + asyncio 顶层导入
 使用 OpenAI 兼容 SDK
+（Embedding 由本地模型承担，见 EmbeddingService — DeepSeek 不提供该端点）
 """
 import asyncio
 import json
@@ -114,42 +115,6 @@ class DeepSeekClient:
                 except Exception as e:
                     logger.warning(f"DeepSeek Stream 调用失败 (尝试 {attempt + 1}/{cls.MAX_RETRIES}): {e}")
                     if attempt == cls.MAX_RETRIES - 1 or not _is_retryable_error(e):
-                        raise
-                    await asyncio.sleep(2 ** attempt)
-
-    @classmethod
-    async def embed(cls, texts: List[str]) -> List[List[float]]:
-        """
-        生成文本 Embedding（使用 DeepSeek 兼容 API）
-
-        Args:
-            texts: 文本列表
-
-        Returns:
-            向量列表 [[dim_1, dim_2, ...], ...]
-        """
-        if not config.is_api_key_set:
-            raise ValueError("DeepSeek API Key 未配置")
-
-        async with _API_SEMAPHORE:
-            for attempt in range(cls.MAX_RETRIES):
-                try:
-                    response = await client.embeddings.create(
-                        model="text-embedding-3-small",  # v4.0: fix — use API-compatible model name (not BGE local model)
-                        input=texts,
-                    )
-                    return [item.embedding for item in response.data]
-                except Exception as e:
-                    status = getattr(e, 'status_code', None)
-                    if status == 404:
-                        logger.warning("DeepSeek Embedding 端点不可用 (404)，请使用本地模型")
-                        raise
-                    logger.warning(f"DeepSeek Embedding 调用失败 (尝试 {attempt + 1}): {e}")
-                    if attempt == cls.MAX_RETRIES - 1 or not _is_retryable_error(e):
-                        logger.error(
-                            "DeepSeek Embedding API 不可用。"
-                            f"请使用本地 Embedding 模型: {config.EMBEDDING_MODEL}"
-                        )
                         raise
                     await asyncio.sleep(2 ** attempt)
 

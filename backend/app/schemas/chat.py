@@ -1,6 +1,7 @@
 """
 聊天 Pydantic Schemas
 """
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -25,6 +26,8 @@ class ChatRequest(BaseModel):
     kb_id: str | None = Field(None, description="知识库ID(可选，用于RAG/Agent模式)")
     session_id: str | None = Field("default", description="会话ID(Agent模式记忆)")
     enable_web: bool | None = Field(False, description="是否启用联网搜索 (Q8)")
+    # v4.2: 对话持久化 — 提供时服务端自动把 user/assistant 消息落库
+    conversation_id: str | None = Field(None, description="对话ID(可选，服务端自动保存消息)")
 
 
 class ChatResponseChoice(BaseModel):
@@ -51,3 +54,51 @@ class ChatResponse(BaseModel):
     usage: ChatUsage | None = None
 
     model_config = {"from_attributes": True}
+
+
+# ══════════ v4.2: 对话持久化 Schemas ══════════
+
+
+class ConversationCreate(BaseModel):
+    """创建对话"""
+    kb_id: str = Field(..., description="所属知识库ID")
+    title: str = Field("新对话", max_length=200, description="对话标题")
+
+
+class ConversationUpdate(BaseModel):
+    """重命名对话"""
+    title: str = Field(..., min_length=1, max_length=200, description="新标题")
+
+
+class ChatMessageOut(BaseModel):
+    """对话消息"""
+    id: str
+    role: str
+    content: str
+    reasoning_steps: list | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ConversationOut(BaseModel):
+    """对话（列表项）"""
+    id: str
+    kb_id: str
+    title: str
+    message_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ConversationDetail(ConversationOut):
+    """对话详情（含消息）"""
+    messages: list[ChatMessageOut] = []
+
+
+class ConversationListResponse(BaseModel):
+    """对话列表"""
+    items: list[ConversationOut]
+    total: int

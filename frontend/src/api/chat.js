@@ -85,3 +85,24 @@ export function chatCompletionsStream(data, onChunk, onDone, onError, onAgentEve
 
   return controller
 }
+
+// ═══ v4.2: 对话管理（服务端持久化） ═══
+export function listConversations(kbId) {
+  return api.get('/chat/conversations', { params: { kb_id: kbId } })
+}
+
+export function createConversation(kbId, title = '新对话') {
+  return api.post('/chat/conversations', { kb_id: kbId, title })
+}
+
+export function getConversation(id) {
+  return api.get(`/chat/conversations/${id}`)
+}
+
+export function renameConversation(id, title) {
+  return api.patch(`/chat/conversations/${id}`, { title })
+}
+
+export function deleteConversation(id) {
+  return api.delete(`/chat/conversations/${id}`, { params: { confirm: true } })
+}

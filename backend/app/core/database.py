@@ -136,6 +136,7 @@ async def close_db():
 
 
 # 确保所有模型在 create_all 前被导入（字符串关系依赖）— 副作用导入，不可被 lint 自动移除
+import app.models.chat_conversation  # noqa: E402, F401  # v4.2: 对话持久化
 import app.models.document  # noqa: E402, F401
 import app.models.graph_entity  # noqa: E402, F401  # Phase 1: GraphRAG
 import app.models.knowledge_base  # noqa: E402, F401

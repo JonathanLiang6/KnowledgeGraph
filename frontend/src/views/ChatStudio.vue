@@ -34,13 +34,26 @@
           @click="openConversation(conv)"
           @keydown.enter.prevent="openConversation(conv)"
         >
+          <div class="conv-top">
+            <div class="conv-tags">
+              <span class="conv-time-tag">{{ formatConvTime(conv.updated_at) }}</span>
+              <span class="conv-count-tag">{{ conv.message_count }} 条</span>
+            </div>
+            <div class="conv-actions" @click.stop>
+              <el-tooltip content="重命名对话" placement="top" :show-delay="200">
+                <button class="conv-btn" aria-label="重命名对话" @click="renameConversationFlow(conv)">
+                  <el-icon :size="15"><Edit /></el-icon>
+                </button>
+              </el-tooltip>
+              <el-tooltip content="删除对话" placement="top" :show-delay="200">
+                <button class="conv-btn conv-btn--del" aria-label="删除对话" @click="removeConversation(conv)">
+                  <el-icon :size="15"><Delete /></el-icon>
+                </button>
+              </el-tooltip>
+            </div>
+          </div>
           <div class="conv-main">
             <div class="conv-title" :title="conv.title">{{ conv.title }}</div>
-            <div class="conv-meta">{{ conv.message_count }} 条 · {{ formatConvTime(conv.updated_at) }}</div>
-          </div>
-          <div class="conv-actions" @click.stop>
-            <button class="conv-btn" title="重命名" aria-label="重命名对话" @click="renameConversationFlow(conv)">✏️</button>
-            <button class="conv-btn conv-btn--del" title="删除" aria-label="删除对话" @click="removeConversation(conv)">🗑️</button>
           </div>
         </div>
       </div>
@@ -206,7 +219,7 @@ import {
   renameConversation,
   deleteConversation,
 } from '../api/chat'
-import { Cpu, User, Plus, Promotion, Close, WarningFilled, ChatDotRound } from '@element-plus/icons-vue'
+import { Cpu, User, Plus, Promotion, Close, WarningFilled, ChatDotRound, Edit, Delete } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -1208,56 +1221,85 @@ onBeforeUnmount(() => {
 }
 
 
-/* ═══ v4.2: 侧栏会话列表 ═══ */
+/* ═══ v4.4: 侧栏会话列表 — 卡片式设计 ═══ */
 .chat-history {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   overflow-y: auto;
   flex: 1;
+  padding-right: 2px;
 }
 
 .conv-item {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 6px;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
   cursor: pointer;
-  border: 1px solid transparent;
-  transition: background 0.18s ease, border-color 0.18s ease;
+  border: 1px solid var(--border-light, #EDF4EE);
+  background: var(--bg-card, #FFFFFF);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 
   &:hover {
-    background: rgba(46, 125, 80, 0.07);
-
-    .conv-actions {
-      opacity: 1;
-    }
+    border-color: rgba(46, 125, 80, 0.3);
+    box-shadow: 0 2px 8px rgba(46, 125, 80, 0.08);
   }
 
   &.conv-item--active {
-    background: rgba(46, 125, 80, 0.12);
-    border-color: rgba(46, 125, 80, 0.25);
+    border-color: var(--color-primary, #2D8C4E);
+    box-shadow: 0 0 0 1px rgba(45, 140, 78, 0.18), 0 2px 8px rgba(46, 125, 80, 0.12);
   }
 }
 
+.conv-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.conv-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.conv-time-tag,
+.conv-count-tag {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.conv-time-tag {
+  color: var(--text-tertiary, #909399);
+  background: var(--bg-page, #F2F7F2);
+}
+
+.conv-count-tag {
+  color: var(--color-primary, #2D8C4E);
+  background: rgba(45, 140, 78, 0.08);
+}
+
 .conv-main {
-  flex: 1;
-  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .conv-title {
+  flex: 1;
   font-size: 13px;
+  font-weight: 500;
   color: var(--text-primary, #303133);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.conv-meta {
-  font-size: 11px;
-  color: var(--text-tertiary, #909399);
-  margin-top: 2px;
+  line-height: 1.4;
 }
 
 .conv-actions {
@@ -1266,28 +1308,43 @@ onBeforeUnmount(() => {
   opacity: 0;
   transition: opacity 0.18s ease;
 
-  /* 触屏/键盘聚焦时也可见 */
   &:focus-within {
     opacity: 1;
   }
 }
 
+.conv-item:hover .conv-actions {
+  opacity: 1;
+}
+
 .conv-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: transparent;
-  padding: 4px;
-  border-radius: 6px;
+  padding: 0;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 12px;
-  line-height: 1;
-  transition: background 0.15s ease;
+  color: var(--text-tertiary, #909399);
+  transition: color 0.15s ease, background 0.15s ease, transform 0.1s ease;
 
   &:hover {
-    background: rgba(46, 125, 80, 0.15);
+    color: var(--color-primary, #2D8C4E);
+    background: rgba(45, 140, 78, 0.08);
   }
 
-  &.conv-btn--del:hover {
-    background: rgba(245, 108, 108, 0.15);
+  &:active {
+    transform: scale(0.9);
+  }
+
+  &.conv-btn--del {
+    &:hover {
+      color: #e5484d;
+      background: rgba(229, 72, 77, 0.08);
+    }
   }
 }
 

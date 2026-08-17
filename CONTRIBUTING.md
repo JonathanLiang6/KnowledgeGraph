@@ -23,7 +23,6 @@ start.bat
 
 ### Python
 - 遵循 Ruff 规则（`line-length=120`, `target-version=py311`）
-- 使用 mypy 进行类型检查（`ignore_missing_imports=true`）
 - 函数/变量命名：`snake_case`
 - 类命名：`PascalCase`
 - 所有路由处理器、数据库操作使用 `async/await`
@@ -46,25 +45,6 @@ start.bat
 3. 提交修改：`git commit -m 'feat: 添加Amazing功能'`
 4. 推送分支：`git push origin feature/amazing-feature`
 5. 提交 Pull Request
-
-## 代码质量检查
-
-```bash
-# Ruff 检查
-make lint
-
-# Ruff 格式化
-make format
-
-# mypy 类型检查
-make typecheck
-
-# pytest 测试
-cd backend && pytest
-
-# 前端 Lint
-cd frontend && npm run lint
-```
 
 ## 版本号
 

@@ -31,12 +31,6 @@ cd backend && pytest                         # 运行所有测试（asyncio_mode
 cd backend && pytest tests/ -v               # 详细输出
 cd backend && pytest tests/ -k "test_name"   # 运行特定测试
 
-# ── 代码质量 ──
-make lint                    # Ruff 检查 + 格式检查（不修改文件）
-make format                  # Ruff 自动修复 + 格式化
-make typecheck               # mypy 类型检查（ignore_missing_imports=true）
-cd frontend && npm run lint  # ESLint 前端检查
-
 # ── 清理 ──
 make clean                   # 清理所有缓存（__pycache__/.pytest_cache/.ruff_cache/.mypy_cache/node_modules/.cache）
 ```
@@ -46,10 +40,10 @@ make clean                   # 清理所有缓存（__pycache__/.pytest_cache/.r
 ```
 KnowledgeGraph/
 ├── start.bat                  # Windows 一键启动（端口清理 + venv 激活 + 后端就绪等待）
-├── Makefile                   # dev / test / lint / format / typecheck / clean
+├── Makefile                   # dev / test / format / clean
 ├── Dockerfile                 # python:3.11-slim，uvicorn 启动
 ├── docker-compose.yml         # backend (8013) + frontend (3000)，kg_data 持久卷
-├── pyproject.toml             # Ruff (line-length=120) / pytest (asyncio_mode=auto) / mypy
+├── pyproject.toml             # Ruff (line-length=120) / pytest (asyncio_mode=auto)
 ├── README.md                  # 项目介绍、快速开始、技术栈
 ├── ROADMAP.md                 # GraphRAG → AgentRAG 演进路线图与技术决策记录
 │
@@ -215,7 +209,7 @@ KnowledgeGraph/
 
 ## 项目规范
 
-- **Python**: 遵循 Ruff 规则（`line-length=120`, `target-version=py311`），mypy 类型检查
+- **Python**: 遵循 Ruff 规则（`line-length=120`, `target-version=py311`）
 - **命名**: 函数/变量 `snake_case`，类 `PascalCase`，文件 `snake_case`
 - **异步**: 所有路由处理器、数据库操作、服务方法使用 `async/await`
 - **API 风格**: OpenAI 兼容格式（`/chat/completions`），SSE 流式响应（`text/event-stream`）

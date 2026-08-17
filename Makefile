@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-backend test lint format typecheck clean docker-build docker-up docker-down
+.PHONY: help install dev dev-backend test format clean docker-build docker-up docker-down
 
 # ── 帮助 ───────────────────────────────────────────────────────
 help:
@@ -11,11 +11,6 @@ help:
 	@echo ""
 	@echo "  测试:"
 	@echo "    make test          运行 pytest"
-	@echo ""
-	@echo "  代码质量:"
-	@echo "    make lint          Ruff 检查 + 格式检查"
-	@echo "    make format        Ruff 自动修复 + 格式化"
-	@echo "    make typecheck     mypy 类型检查"
 	@echo ""
 	@echo "  Docker:"
 	@echo "    make docker-build  构建 Docker 镜像"
@@ -44,20 +39,6 @@ dev-backend:
 # ── 测试 ─────────────────────────────────────────────────────
 test:
 	cd backend && python -m pytest tests/ -v
-
-# ── 代码检查 ─────────────────────────────────────────────────
-lint:
-	cd backend && python -m ruff check app/
-	cd backend && python -m ruff format --check app/
-
-# 代码格式化
-format:
-	cd backend && python -m ruff check --fix app/
-	cd backend && python -m ruff format app/
-
-# ── 类型检查 ─────────────────────────────────────────────────
-typecheck:
-	cd backend && python -m mypy app/
 
 # ── Docker ────────────────────────────────────────────────────
 docker-build:

@@ -308,10 +308,10 @@ Upload → Validate → Parse → Clean → Chunk → Extract → Embed → Inde
 ```
 KnowledgeGraph/
 ├── start.bat                          # Windows 一键启动
-├── Makefile                           # dev / test / lint / format / clean
+├── Makefile                           # dev / test / format / clean
 ├── Dockerfile                         # python:3.11-slim 多阶段构建
 ├── docker-compose.yml                 # backend:8013 + frontend:3000
-├── pyproject.toml                     # Ruff / pytest / mypy 配置
+├── pyproject.toml                     # Ruff / pytest 配置
 │
 ├── backend/
 │   ├── .env.example                   # 环境变量模板
@@ -412,24 +412,20 @@ KnowledgeGraph/
 # 测试
 cd backend && pytest
 
-# 代码质量
-make lint          # Ruff 检查
-make format        # Ruff 自动修复 + 格式化
-make typecheck     # mypy 类型检查
+# 清理
 make clean         # 清理所有缓存
 
 # 前端
-cd frontend && npm run lint
 cd frontend && npm run build
 ```
 
 ### 编码规范
 
-- **Python**：Ruff (`line-length=120`, `target-version=py311`)，mypy 类型检查，`snake_case` 命名
+- **Python**：Ruff (`line-length=120`, `target-version=py311`)，`snake_case` 命名
 - **异步**：所有路由、数据库操作、服务方法使用 `async/await`
 - **Pydantic v2**：`model_validate` / `model_dump`，废弃 v1 API
 - **API**：OpenAI 兼容格式，SSE `text/event-stream` 流式响应
-- **前端**：Vue 3 Composition API，SCSS 森林绿主题，ESLint
+- **前端**：Vue 3 Composition API，SCSS 森林绿主题
 - **Git**：`main` 分支，功能分支 `vX.Y`，`.env` / `data/` / `__pycache__` 不入库
 
 ## 版本历史

@@ -25,13 +25,13 @@ export function useTopologyRenderer(hostRef, opts = {}) {
 
   // 轨道半径配置
   const ORBIT_BRANCH = 240   // 分支节点轨道半径
-  const ORBIT_KB = 420       // KB 节点轨道半径
+  const ORBIT_KB = 400       // KB 节点轨道半径
 
   // 力参数 — 非常温和，只做微调
   const COLLIDE_DIST = 90    // 触发碰撞推开的最小距离
   const PUSH_FORCE = 0.08    // 碰撞推开的力度
   const PULL_FORCE = 0.04    // 拉回轨道的力度
-  const SHRINK_DIST = 18     // 收缩距离（KB节点向中心收缩）
+  const SHRINK_DIST = 24     // 收缩距离（KB节点向中心收缩）
   const SHRINK_DURATION = 600 // 收缩时长 ms
 
   // 入场动画
@@ -440,7 +440,7 @@ export function useTopologyRenderer(hostRef, opts = {}) {
         }
       } else {
         // 分支/知识库节点
-        ctx.fillStyle = isBranch ? '#6FBF82' : '#1E6B40'
+        ctx.fillStyle = isBranch ? '#0d9b2e' : '#1E6B40'
         ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill()
 
         ctx.strokeStyle = isBranch ? 'rgba(170, 235, 190, 0.55)' : 'rgba(60, 182, 110, 0.4)'

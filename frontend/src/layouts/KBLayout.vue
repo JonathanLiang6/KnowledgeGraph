@@ -2,11 +2,6 @@
   <div class="kb-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
     <!-- 左侧导航栏 -->
     <aside class="kb-sidebar">
-      <!-- 折叠切换按钮（侧边栏右侧边缘，垂直居中） -->
-      <button class="collapse-btn" @click="sidebarCollapsed = !sidebarCollapsed" :title="sidebarCollapsed ? '展开导航' : '收起导航'">
-        <el-icon :size="18" class="collapse-icon" :class="{ flipped: !sidebarCollapsed }"><ArrowRight /></el-icon>
-      </button>
-
       <!-- 知识库头部 -->
       <div class="sidebar-header" v-if="kb">
         <div class="kb-icon-wrap">
@@ -56,6 +51,13 @@
         </button>
       </div>
     </aside>
+
+    <!-- 折叠切换按钮（侧边栏右侧边缘，垂直居中）
+         v4.2: 挂在布局层而非侧栏内 — 侧栏 overflow:hidden 会把 right:-12px
+         悬边的按钮裁掉一半，移出后完整可见且随收起动画平移 -->
+    <button class="collapse-btn" @click="sidebarCollapsed = !sidebarCollapsed" :title="sidebarCollapsed ? '展开导航' : '收起导航'">
+      <el-icon :size="18" class="collapse-icon" :class="{ flipped: !sidebarCollapsed }"><ArrowRight /></el-icon>
+    </button>
 
     <!-- 内容区 -->
     <main class="kb-main">
@@ -132,6 +134,7 @@ $sidebar-collapsed-width: 64px;
   display: flex;
   background: var(--bg-page);
   transition: padding-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;  // v4.2: 折叠按钮以布局为定位基准
 }
 
 // ── 左侧导航栏 ──────────────────────────────────────────
@@ -155,10 +158,11 @@ $sidebar-collapsed-width: 64px;
 }
 
 // 折叠按钮（侧边栏右侧边缘，垂直居中）
+// v4.2: 绝对定位于布局层（left 跟随侧栏宽度过渡），不再被侧栏 overflow:hidden 裁切
 .collapse-btn {
   position: absolute;
   top: 50%;
-  right: -12px;
+  left: calc(#{$sidebar-width} - 12px);
   transform: translateY(-50%);
   width: 24px;
   height: 24px;
@@ -170,8 +174,16 @@ $sidebar-collapsed-width: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 10;
-  transition: all var(--transition-fast);
+  z-index: 101;  // 高于侧栏(z:100)
+  box-shadow: 0 2px 8px rgba(27, 79, 52, 0.12);
+  transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              background var(--transition-fast),
+              color var(--transition-fast),
+              border-color var(--transition-fast);
+
+  .sidebar-collapsed & {
+    left: calc(#{$sidebar-collapsed-width} - 12px);
+  }
 
   &:hover {
     background: var(--color-primary);

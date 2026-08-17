@@ -192,7 +192,7 @@ function renderChart() {
         borderWidth: 2,
       },
       label: {
-        formatter: '{b}\\n{d}%',
+        formatter: '{b} {d}%',
         color: '#606266',
         fontSize: 12,
         lineHeight: 16,
